@@ -15,6 +15,10 @@ function toSafeUser(user: User): SafeUser {
     email: user.email,
     name: user.name,
     role: user.role,
+    plan: user.plan,
+    trial_ends_at: user.trial_ends_at,
+    stripe_customer_id: user.stripe_customer_id,
+    account_status: user.account_status,
     created_at: user.created_at,
   };
 }

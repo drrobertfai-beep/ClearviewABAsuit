@@ -1,11 +1,84 @@
 // Dashboard — landing page at /
 import { createFileRoute, Link } from "@tanstack/react-router";
+import { useState } from "react";
 
 export const Route = createFileRoute("/")({
   component: Dashboard,
 });
 
+function daysUntil(dateStr: string | null): number {
+  if (!dateStr) return 0;
+  const now = new Date();
+  const end = new Date(dateStr);
+  return Math.max(0, Math.ceil((end.getTime() - now.getTime()) / (1000 * 60 * 60 * 24)));
+}
+
+function TrialBanner({ trialEndsAt, plan }: { trialEndsAt: string | null; plan: string }) {
+  const [dismissed, setDismissed] = useState(false);
+
+  if (dismissed) return null;
+
+  const daysLeft = daysUntil(trialEndsAt);
+  const isExpired = daysLeft === 0 && trialEndsAt !== null;
+
+  if (plan !== "trial" && !isExpired) return null;
+
+  return (
+    <div className={`rounded-lg p-4 mb-8 border ${isExpired ? "bg-red-50 border-red-200" : "bg-amber-50 border-amber-200"}`}>
+      <div className="flex items-start justify-between gap-4">
+        <div className="flex items-center gap-3">
+          {isExpired ? (
+            <svg className="h-6 w-6 flex-shrink-0 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 3.75h.008v.008H12v-.008Z" />
+            </svg>
+          ) : (
+            <svg className="h-6 w-6 flex-shrink-0 text-amber-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
+            </svg>
+          )}
+          <div>
+            <p className={`text-sm font-semibold ${isExpired ? "text-red-800" : "text-amber-800"}`}>
+              {isExpired
+                ? "Your free trial has expired"
+                : `You have ${daysLeft} day${daysLeft === 1 ? "" : "s"} left in your free trial`}
+            </p>
+            <p className={`text-sm ${isExpired ? "text-red-700" : "text-amber-700"}`}>
+              {isExpired
+                ? "Please select a plan to continue using ClearView ABA Suite."
+                : "Choose a plan to keep your account active after the trial ends."}
+            </p>
+          </div>
+        </div>
+        <div className="flex items-center gap-2 flex-shrink-0">
+          <Link
+            to="/billing"
+            className={`rounded-md px-3 py-1.5 text-sm font-semibold shadow-sm transition-colors ${
+              isExpired
+                ? "bg-red-600 text-white hover:bg-red-500"
+                : "bg-amber-600 text-white hover:bg-amber-500"
+            }`}
+          >
+            {isExpired ? "Select Plan" : "Choose Plan"}
+          </Link>
+          <button
+            onClick={() => setDismissed(true)}
+            className="rounded-md p-1.5 text-gray-400 hover:text-gray-600 transition-colors"
+            aria-label="Dismiss"
+          >
+            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function Dashboard() {
+  const ctx = Route.useRouteContext();
+  const user = ctx.user as { plan?: string; trial_ends_at?: string | null; account_status?: string } | null;
+
   const quickLinks = [
     {
       to: "/clients",
@@ -63,6 +136,11 @@ function Dashboard() {
 
   return (
     <div className="mx-auto max-w-6xl px-4 py-8 sm:px-6 lg:px-8">
+      {/* Trial Banner */}
+      {user && (user.plan === "trial" || user.account_status === "trial") && (
+        <TrialBanner trialEndsAt={user.trial_ends_at ?? null} plan={user.plan ?? "trial"} />
+      )}
+
       {/* Hero */}
       <div className="mb-10">
         <h1 className="text-3xl font-bold tracking-tight text-gray-900 sm:text-4xl">

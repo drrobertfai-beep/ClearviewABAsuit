@@ -38,6 +38,10 @@ CREATE TABLE IF NOT EXISTS users (
     name TEXT NOT NULL,
     role TEXT NOT NULL DEFAULT 'bcba' CHECK (role IN ('bcba', 'bcaba', 'admin', 'parent')),
     password_hash TEXT NOT NULL,
+    plan TEXT NOT NULL DEFAULT 'trial' CHECK (plan IN ('trial', 'solo', 'practice', 'clinic')),
+    trial_ends_at TIMESTAMPTZ DEFAULT (now() + INTERVAL '14 days'),
+    stripe_customer_id TEXT,
+    account_status TEXT NOT NULL DEFAULT 'trial' CHECK (account_status IN ('trial', 'active', 'past_due', 'cancelled')),
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 

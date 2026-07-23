@@ -16,7 +16,16 @@ import type { User } from "~/db/types";
 // ============================================================================
 // SafeUser — public user object (no password_hash)
 // ============================================================================
-export type SafeUser = Omit<User, "password_hash">;
+export interface SafeUser {
+  id: string;
+  email: string;
+  name: string;
+  role: User["role"];
+  plan: User["plan"];
+  trial_ends_at: string | null;
+  account_status: User["account_status"];
+  created_at: string;
+}
 
 function toSafeUser(user: User): SafeUser {
   return {
@@ -24,6 +33,9 @@ function toSafeUser(user: User): SafeUser {
     email: user.email,
     name: user.name,
     role: user.role,
+    plan: user.plan,
+    trial_ends_at: user.trial_ends_at,
+    account_status: user.account_status,
     created_at: user.created_at,
   };
 }
@@ -97,10 +109,11 @@ export const registerFn = createServerFn({ method: "POST" })
         email: string;
         password: string;
         role: string;
+        plan?: string;
       },
   )
   .handler(async ({ data }) => {
-    const { name, email, password, role } = data;
+    const { name, email, password, role, plan } = data;
 
     // Validate inputs
     if (!name || !email || !password || !role) {
@@ -126,6 +139,12 @@ export const registerFn = createServerFn({ method: "POST" })
     const passwordHash = await Bun.password.hash(password);
     const user = await createUser(name, email, passwordHash, role);
 
+    // If plan was specified, update the user's plan (default is "trial" from DB)
+    if (plan && ["solo", "practice", "clinic"].includes(plan)) {
+      const { updateUserPlan } = await import("~/db/auth");
+      await updateUserPlan(user.id, plan as "solo" | "practice" | "clinic", "trial");
+    }
+
     // Create session (auto-login)
     const token = crypto.randomUUID();
     const expiresAt = new Date(Date.now() + SESSION_MAX_AGE * 1000);
@@ -140,7 +159,10 @@ export const registerFn = createServerFn({ method: "POST" })
       maxAge: SESSION_MAX_AGE,
     });
 
-    return toSafeUser(user);
+    // Re-fetch user to get updated plan info
+    const { getUserById } = await import("~/db/auth");
+    const updatedUser = await getUserById(user.id);
+    return toSafeUser(updatedUser ?? user);
   });
 
 // ============================================================================

@@ -113,6 +113,8 @@ export interface AuditEntry {
 }
 
 export type UserRole = "bcba" | "bcaba" | "admin" | "parent";
+export type PlanTier = "trial" | "solo" | "practice" | "clinic";
+export type AccountStatus = "trial" | "active" | "past_due" | "cancelled";
 
 export interface User {
   id: string;
@@ -120,5 +122,9 @@ export interface User {
   name: string;
   role: UserRole;
   password_hash: string;
+  plan: PlanTier;
+  trial_ends_at: string | null;
+  stripe_customer_id: string | null;
+  account_status: AccountStatus;
   created_at: string;
 }
