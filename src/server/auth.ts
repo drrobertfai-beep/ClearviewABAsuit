@@ -11,6 +11,7 @@ import {
   getSessionByToken,
   deleteSession,
 } from "~/db/auth";
+import { hashPassword, verifyPassword } from "~/server/password";
 import type { User } from "~/db/types";
 
 // ============================================================================
@@ -76,7 +77,7 @@ export const loginFn = createServerFn({ method: "POST" })
       throw new Error("Invalid email or password.");
     }
 
-    const valid = await Bun.password.verify(password, user.password_hash);
+    const valid = await verifyPassword(password, user.password_hash);
     if (!valid) {
       throw new Error("Invalid email or password.");
     }
@@ -136,7 +137,7 @@ export const registerFn = createServerFn({ method: "POST" })
     }
 
     // Hash password and create user
-    const passwordHash = await Bun.password.hash(password);
+    const passwordHash = await hashPassword(password);
     const user = await createUser(name, email, passwordHash, role);
 
     // If plan was specified, update the user's plan (default is "trial" from DB)
