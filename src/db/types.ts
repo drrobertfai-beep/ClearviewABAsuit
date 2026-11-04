@@ -19,6 +19,8 @@ export interface Client {
   consent_flags: unknown;
   privacy_notes: string | null;
   status: ClientStatus;
+  /** TRUE for rows created by the demo seed script. */
+  is_demo?: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -36,11 +38,18 @@ export interface Assessment {
   status: AssessmentStatus;
   raw_scores: unknown;
   summary_notes: string | null;
+  /** TRUE for rows created by the demo seed script. */
+  is_demo?: boolean;
   created_at: string;
   updated_at: string;
 }
 
-export type TreatmentPlanStatus = "draft" | "review" | "approved" | "active" | "completed";
+export type TreatmentPlanStatus =
+  | "draft"
+  | "review"
+  | "approved"
+  | "active"
+  | "completed";
 
 export interface ConcurrentService {
   service: string;
@@ -81,6 +90,8 @@ export interface TreatmentPlan {
   requested_services: unknown;
   therapy_schedule: unknown;
   status: TreatmentPlanStatus;
+  /** TRUE for rows created by the demo seed script. */
+  is_demo?: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -97,6 +108,8 @@ export interface Signature {
   signature_data: string | null;
   signed_at: string;
   ip_address: string | null;
+  /** TRUE for rows created by the demo seed script. */
+  is_demo?: boolean;
 }
 
 export type AuditAction = "CREATE" | "UPDATE" | "DELETE";
@@ -110,6 +123,8 @@ export interface AuditEntry {
   changed_at: string;
   old_values: unknown;
   new_values: unknown;
+  /** TRUE for entries written by the demo seed script. */
+  is_demo?: boolean;
 }
 
 export type UserRole = "bcba" | "bcaba" | "admin" | "parent";

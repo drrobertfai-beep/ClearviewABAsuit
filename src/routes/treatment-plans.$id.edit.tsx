@@ -2,7 +2,10 @@
 // Multi-tab form that auto-populates from client + assessment data.
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { getTreatmentPlanContextFn, updateTreatmentPlanFn } from "~/server/treatment-plans";
+import {
+  getTreatmentPlanContextFn,
+  updateTreatmentPlanFn,
+} from "~/server/treatment-plans";
 import { getClientFn } from "~/server/clients";
 import { getAssessmentFn } from "~/server/assessments";
 import type { TreatmentPlan, Client, Assessment } from "~/db/types";
@@ -11,16 +14,43 @@ import type { TreatmentPlan, Client, Assessment } from "~/db/types";
 function parseJsonField<T>(val: unknown, fallback: T): T {
   if (val == null) return fallback;
   if (typeof val === "string") {
-    try { return JSON.parse(val) as T; } catch { return fallback; }
+    try {
+      return JSON.parse(val) as T;
+    } catch {
+      return fallback;
+    }
   }
   if (Array.isArray(val)) return val as T;
   if (typeof val === "object") return val as T;
   return fallback;
 }
 
-const DOMAINS = ["Communication", "Social Skills", "Adaptive/Daily Living", "Academics", "Play/Leisure", "Motor Skills", "Community Safety", "Other"] as const;
-const MEASUREMENTS = ["frequency", "duration", "latency", "percent correct", "trials to criterion"] as const;
-const DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"] as const;
+const DOMAINS = [
+  "Communication",
+  "Social Skills",
+  "Adaptive/Daily Living",
+  "Academics",
+  "Play/Leisure",
+  "Motor Skills",
+  "Community Safety",
+  "Other",
+] as const;
+const MEASUREMENTS = [
+  "frequency",
+  "duration",
+  "latency",
+  "percent correct",
+  "trials to criterion",
+] as const;
+const DAYS = [
+  "Monday",
+  "Tuesday",
+  "Wednesday",
+  "Thursday",
+  "Friday",
+  "Saturday",
+  "Sunday",
+] as const;
 const PLAN_STATUSES = [
   { value: "draft", label: "Draft" },
   { value: "review", label: "Ready for Review" },
@@ -29,7 +59,15 @@ const PLAN_STATUSES = [
   { value: "completed", label: "Completed" },
 ] as const;
 
-type TabId = "client" | "family" | "behavior" | "goals" | "outcomes" | "parent" | "services" | "review";
+type TabId =
+  | "client"
+  | "family"
+  | "behavior"
+  | "goals"
+  | "outcomes"
+  | "parent"
+  | "services"
+  | "review";
 const TABS: { id: TabId; label: string }[] = [
   { id: "client", label: "Client & Background" },
   { id: "family", label: "Family & School" },
@@ -42,13 +80,41 @@ const TABS: { id: TabId; label: string }[] = [
 ];
 
 // ---- Local form data ----
-type LocalConcurrentService = { service: string; provider: string; frequency?: string };
-type LocalMaladaptiveBehavior = { behavior: string; topography: string; frequency: string; intensity: string; duration: string };
-type LocalSkillGoal = { domain: string; description: string; measurement: string; baseline: string; target: string; target_date: string };
+type LocalConcurrentService = {
+  service: string;
+  provider: string;
+  frequency?: string;
+};
+type LocalMaladaptiveBehavior = {
+  behavior: string;
+  topography: string;
+  frequency: string;
+  intensity: string;
+  duration: string;
+};
+type LocalSkillGoal = {
+  domain: string;
+  description: string;
+  measurement: string;
+  baseline: string;
+  target: string;
+  target_date: string;
+};
 type LocalParentGoal = { goal: string; method: string; frequency: string };
 type LocalCoordGoal = { provider: string; goal: string; method: string };
-type LocalService = { service_name: string; cpt_code: string; frequency: string; duration: string; hours_per_week?: number };
-type LocalScheduleEntry = { day: string; time: string; location: string; service_type: string };
+type LocalService = {
+  service_name: string;
+  cpt_code: string;
+  frequency: string;
+  duration: string;
+  hours_per_week?: number;
+};
+type LocalScheduleEntry = {
+  day: string;
+  time: string;
+  location: string;
+  service_type: string;
+};
 
 interface LocalForm {
   reason_for_referral: string;
@@ -98,18 +164,39 @@ function planToLocal(plan: TreatmentPlan): LocalForm {
     diagnosis: plan.diagnosis ?? "",
     client_background: "",
     treatment_history: plan.treatment_history ?? "",
-    concurrent_services: parseJsonField<LocalConcurrentService[]>(plan.concurrent_services, []),
+    concurrent_services: parseJsonField<LocalConcurrentService[]>(
+      plan.concurrent_services,
+      [],
+    ),
     family_history: plan.family_history ?? "",
     school_info: plan.school_info ?? "",
-    maladaptive_behaviors: parseJsonField<LocalMaladaptiveBehavior[]>(plan.maladaptive_behaviors, []),
+    maladaptive_behaviors: parseJsonField<LocalMaladaptiveBehavior[]>(
+      plan.maladaptive_behaviors,
+      [],
+    ),
     behavior_intervention_plan: plan.behavior_intervention_plan ?? "",
-    skill_acquisition_goals: parseJsonField<LocalSkillGoal[]>(plan.skill_acquisition_goals, []),
+    skill_acquisition_goals: parseJsonField<LocalSkillGoal[]>(
+      plan.skill_acquisition_goals,
+      [],
+    ),
     assessment_outcomes: plan.assessment_outcomes ?? "",
-    parent_training_goals: parseJsonField<LocalParentGoal[]>(plan.parent_training_goals, []),
-    service_coordination_goals: parseJsonField<LocalCoordGoal[]>(plan.service_coordination_goals, []),
+    parent_training_goals: parseJsonField<LocalParentGoal[]>(
+      plan.parent_training_goals,
+      [],
+    ),
+    service_coordination_goals: parseJsonField<LocalCoordGoal[]>(
+      plan.service_coordination_goals,
+      [],
+    ),
     discharge_criteria: plan.discharge_criteria ?? "",
-    requested_services: parseJsonField<LocalService[]>(plan.requested_services, []),
-    therapy_schedule: parseJsonField<LocalScheduleEntry[]>(plan.therapy_schedule, []),
+    requested_services: parseJsonField<LocalService[]>(
+      plan.requested_services,
+      [],
+    ),
+    therapy_schedule: parseJsonField<LocalScheduleEntry[]>(
+      plan.therapy_schedule,
+      [],
+    ),
     status: plan.status,
   };
 }
@@ -118,7 +205,7 @@ export const Route = createFileRoute("/treatment-plans/$id/edit")({
   component: TreatmentPlanEditPage,
   loader: async ({ params }) => {
     try {
-      return await getTreatmentPlanContextFn({ planId: params.id });
+      return await getTreatmentPlanContextFn({ data: { planId: params.id } });
     } catch {
       return { plan: null, client: null, assessment: null };
     }
@@ -136,7 +223,9 @@ function TreatmentPlanEditPage() {
 
   const [plan, setPlan] = useState<TreatmentPlan | null>(initial.plan);
   const [client, setClient] = useState<Client | null>(initial.client);
-  const [assessment, setAssessment] = useState<Assessment | null>(initial.assessment);
+  const [assessment, setAssessment] = useState<Assessment | null>(
+    initial.assessment,
+  );
   const [form, setForm] = useState<LocalForm>(emptyForm());
   const [activeTab, setActiveTab] = useState<TabId>("client");
   const [saving, setSaving] = useState(false);
@@ -146,11 +235,13 @@ function TreatmentPlanEditPage() {
   // Load on mount
   useEffect(() => {
     if (!initial.plan) {
-      getTreatmentPlanContextFn({ planId: params.id }).then((r) => {
-        setPlan(r.plan);
-        setClient(r.client);
-        setAssessment(r.assessment);
-      }).catch(() => {});
+      getTreatmentPlanContextFn({ data: { planId: params.id } })
+        .then((r) => {
+          setPlan(r.plan);
+          setClient(r.client);
+          setAssessment(r.assessment);
+        })
+        .catch(() => {});
     }
   }, [initial.plan, params.id]);
 
@@ -174,7 +265,12 @@ function TreatmentPlanEditPage() {
 
   // Auto-populate assessment outcomes
   useEffect(() => {
-    if (assessment && plan && !form.assessment_outcomes && assessment.raw_scores) {
+    if (
+      assessment &&
+      plan &&
+      !form.assessment_outcomes &&
+      assessment.raw_scores
+    ) {
       const rs = assessment.raw_scores as Record<string, unknown>;
       if (rs._computed && typeof rs._computed === "object") {
         const c = rs._computed as Record<string, unknown>;
@@ -215,24 +311,31 @@ function TreatmentPlanEditPage() {
     setSaveMsg("");
     try {
       const updated = await updateTreatmentPlanFn({
-        id: plan.id,
         data: {
-          reason_for_referral: form.reason_for_referral || null,
-          diagnosis: form.diagnosis || null,
-          treatment_history: (form.client_background + "\n\n" + form.treatment_history).trim() || null,
-          concurrent_services: form.concurrent_services,
-          family_history: form.family_history || null,
-          school_info: form.school_info || null,
-          maladaptive_behaviors: form.maladaptive_behaviors,
-          behavior_intervention_plan: form.behavior_intervention_plan || null,
-          skill_acquisition_goals: form.skill_acquisition_goals,
-          assessment_outcomes: form.assessment_outcomes || null,
-          parent_training_goals: form.parent_training_goals,
-          service_coordination_goals: form.service_coordination_goals,
-          discharge_criteria: form.discharge_criteria || null,
-          requested_services: form.requested_services,
-          therapy_schedule: form.therapy_schedule,
-          status: form.status as TreatmentPlan["status"],
+          id: plan.id,
+          data: {
+            reason_for_referral: form.reason_for_referral || null,
+            diagnosis: form.diagnosis || null,
+            treatment_history:
+              (
+                form.client_background +
+                "\n\n" +
+                form.treatment_history
+              ).trim() || null,
+            concurrent_services: form.concurrent_services,
+            family_history: form.family_history || null,
+            school_info: form.school_info || null,
+            maladaptive_behaviors: form.maladaptive_behaviors,
+            behavior_intervention_plan: form.behavior_intervention_plan || null,
+            skill_acquisition_goals: form.skill_acquisition_goals,
+            assessment_outcomes: form.assessment_outcomes || null,
+            parent_training_goals: form.parent_training_goals,
+            service_coordination_goals: form.service_coordination_goals,
+            discharge_criteria: form.discharge_criteria || null,
+            requested_services: form.requested_services,
+            therapy_schedule: form.therapy_schedule,
+            status: form.status as TreatmentPlan["status"],
+          },
         },
       });
       if (updated) {
@@ -253,7 +356,26 @@ function TreatmentPlanEditPage() {
     return (
       <div className="mx-auto max-w-4xl px-4 py-6 sm:px-6 lg:px-8">
         <div className="flex items-center gap-3 py-12 text-gray-500 justify-center">
-          <svg className="h-5 w-5 animate-spin" viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
+          <svg
+            className="h-5 w-5 animate-spin"
+            viewBox="0 0 24 24"
+            fill="none"
+            aria-hidden="true"
+          >
+            <circle
+              className="opacity-25"
+              cx="12"
+              cy="12"
+              r="10"
+              stroke="currentColor"
+              strokeWidth="4"
+            />
+            <path
+              className="opacity-75"
+              fill="currentColor"
+              d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
+            />
+          </svg>
           Loading&hellip;
         </div>
       </div>
@@ -261,9 +383,27 @@ function TreatmentPlanEditPage() {
   }
 
   const statusBadge = (status: string) => {
-    const colors: Record<string, string> = { draft: "bg-gray-100 text-gray-600", review: "bg-yellow-100 text-yellow-800", approved: "bg-blue-100 text-blue-800", active: "bg-green-100 text-green-800", completed: "bg-emerald-100 text-emerald-800" };
-    const labels: Record<string, string> = { draft: "Draft", review: "In Review", approved: "Approved", active: "Active", completed: "Completed" };
-    return <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${colors[status] ?? "bg-gray-100 text-gray-600"}`}>{labels[status] ?? status}</span>;
+    const colors: Record<string, string> = {
+      draft: "bg-gray-100 text-gray-600",
+      review: "bg-yellow-100 text-yellow-800",
+      approved: "bg-blue-100 text-blue-800",
+      active: "bg-green-100 text-green-800",
+      completed: "bg-emerald-100 text-emerald-800",
+    };
+    const labels: Record<string, string> = {
+      draft: "Draft",
+      review: "In Review",
+      approved: "Approved",
+      active: "Active",
+      completed: "Completed",
+    };
+    return (
+      <span
+        className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${colors[status] ?? "bg-gray-100 text-gray-600"}`}
+      >
+        {labels[status] ?? status}
+      </span>
+    );
   };
 
   // ---- Tab content renderers ----
@@ -271,45 +411,156 @@ function TreatmentPlanEditPage() {
     <div className="space-y-5">
       {/* Client info card (read-only) */}
       <div className="rounded-md bg-gray-50 p-4">
-        <h3 className="text-sm font-semibold text-gray-700 mb-3">Client Information</h3>
+        <h3 className="text-sm font-semibold text-gray-700 mb-3">
+          Client Information
+        </h3>
         <dl className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-sm">
-          <div><dt className="text-xs text-gray-500">Name</dt><dd className="font-medium text-gray-900">{client?.name ?? "—"}</dd></div>
-          <div><dt className="text-xs text-gray-500">DOB</dt><dd className="font-medium text-gray-900">{client?.date_of_birth ? new Date(client.date_of_birth).toLocaleDateString() : "—"}</dd></div>
-          <div><dt className="text-xs text-gray-500">Setting</dt><dd className="font-medium text-gray-900">{client?.setting ?? "—"}</dd></div>
-          <div><dt className="text-xs text-gray-500">Contact</dt><dd className="font-medium text-gray-900">{client?.contact_email || client?.contact_phone || "—"}</dd></div>
-          {plan.assessment_id && <div className="sm:col-span-2"><dt className="text-xs text-gray-500">Linked Assessment</dt><dd className="font-medium text-gray-900">{assessment?.tool_name ?? "—"} {assessment ? `(${new Date(assessment.assessment_date).toLocaleDateString()})` : ""}</dd></div>}
+          <div>
+            <dt className="text-xs text-gray-500">Name</dt>
+            <dd className="font-medium text-gray-900">{client?.name ?? "—"}</dd>
+          </div>
+          <div>
+            <dt className="text-xs text-gray-500">DOB</dt>
+            <dd className="font-medium text-gray-900">
+              {client?.date_of_birth
+                ? new Date(client.date_of_birth).toLocaleDateString()
+                : "—"}
+            </dd>
+          </div>
+          <div>
+            <dt className="text-xs text-gray-500">Setting</dt>
+            <dd className="font-medium text-gray-900">
+              {client?.setting ?? "—"}
+            </dd>
+          </div>
+          <div>
+            <dt className="text-xs text-gray-500">Contact</dt>
+            <dd className="font-medium text-gray-900">
+              {client?.contact_email || client?.contact_phone || "—"}
+            </dd>
+          </div>
+          {plan.assessment_id && (
+            <div className="sm:col-span-2">
+              <dt className="text-xs text-gray-500">Linked Assessment</dt>
+              <dd className="font-medium text-gray-900">
+                {assessment?.tool_name ?? "—"}{" "}
+                {assessment
+                  ? `(${new Date(assessment.assessment_date).toLocaleDateString()})`
+                  : ""}
+              </dd>
+            </div>
+          )}
         </dl>
       </div>
 
       <Field label="Reason for Referral">
-        <textarea value={form.reason_for_referral} onChange={(e) => update({ reason_for_referral: e.target.value })} className="input" rows={3} placeholder="Describe the reason for referral and clinical concerns..." />
+        <textarea
+          value={form.reason_for_referral}
+          onChange={(e) => update({ reason_for_referral: e.target.value })}
+          className="input"
+          rows={3}
+          placeholder="Describe the reason for referral and clinical concerns..."
+        />
       </Field>
 
       <Field label="Client Background Information">
-        <textarea value={form.client_background} onChange={(e) => update({ client_background: e.target.value })} className="input" rows={3} placeholder="Family context, environment, relevant history..." />
+        <textarea
+          value={form.client_background}
+          onChange={(e) => update({ client_background: e.target.value })}
+          className="input"
+          rows={3}
+          placeholder="Family context, environment, relevant history..."
+        />
       </Field>
 
       <Field label="Diagnosis">
-        <input type="text" value={form.diagnosis} onChange={(e) => update({ diagnosis: e.target.value })} className="input" placeholder="e.g. Autism Spectrum Disorder (F84.0)" />
+        <input
+          type="text"
+          value={form.diagnosis}
+          onChange={(e) => update({ diagnosis: e.target.value })}
+          className="input"
+          placeholder="e.g. Autism Spectrum Disorder (F84.0)"
+        />
       </Field>
 
       <Field label="Treatment History">
-        <textarea value={form.treatment_history} onChange={(e) => update({ treatment_history: e.target.value })} className="input" rows={2} placeholder="Previous ABA, speech, OT interventions and outcomes..." />
+        <textarea
+          value={form.treatment_history}
+          onChange={(e) => update({ treatment_history: e.target.value })}
+          className="input"
+          rows={2}
+          placeholder="Previous ABA, speech, OT interventions and outcomes..."
+        />
       </Field>
 
       {/* Concurrent Services */}
       <fieldset>
-        <legend className="block text-sm font-medium text-gray-700 mb-2">Concurrent Services</legend>
+        <legend className="block text-sm font-medium text-gray-700 mb-2">
+          Concurrent Services
+        </legend>
         <div className="space-y-2">
           {form.concurrent_services.map((s, i) => (
             <div key={i} className="flex gap-2 items-start">
-              <input value={s.service} onChange={(e) => { const n = [...form.concurrent_services]; n[i] = { ...n[i], service: e.target.value }; update({ concurrent_services: n }); }} className="input flex-1" placeholder="Service name" />
-              <input value={s.provider} onChange={(e) => { const n = [...form.concurrent_services]; n[i] = { ...n[i], provider: e.target.value }; update({ concurrent_services: n }); }} className="input flex-1" placeholder="Provider" />
-              <input value={s.frequency ?? ""} onChange={(e) => { const n = [...form.concurrent_services]; n[i] = { ...n[i], frequency: e.target.value }; update({ concurrent_services: n }); }} className="input w-28" placeholder="Freq." />
-              <button type="button" onClick={() => update({ concurrent_services: form.concurrent_services.filter((_, j) => j !== i) })} className="p-2 text-red-400 hover:text-red-600 text-lg" aria-label="Remove">×</button>
+              <input
+                value={s.service}
+                onChange={(e) => {
+                  const n = [...form.concurrent_services];
+                  n[i] = { ...n[i], service: e.target.value };
+                  update({ concurrent_services: n });
+                }}
+                className="input flex-1"
+                placeholder="Service name"
+              />
+              <input
+                value={s.provider}
+                onChange={(e) => {
+                  const n = [...form.concurrent_services];
+                  n[i] = { ...n[i], provider: e.target.value };
+                  update({ concurrent_services: n });
+                }}
+                className="input flex-1"
+                placeholder="Provider"
+              />
+              <input
+                value={s.frequency ?? ""}
+                onChange={(e) => {
+                  const n = [...form.concurrent_services];
+                  n[i] = { ...n[i], frequency: e.target.value };
+                  update({ concurrent_services: n });
+                }}
+                className="input w-28"
+                placeholder="Freq."
+              />
+              <button
+                type="button"
+                onClick={() =>
+                  update({
+                    concurrent_services: form.concurrent_services.filter(
+                      (_, j) => j !== i,
+                    ),
+                  })
+                }
+                className="p-2 text-red-400 hover:text-red-600 text-lg"
+                aria-label="Remove"
+              >
+                ×
+              </button>
             </div>
           ))}
-          <button type="button" onClick={() => update({ concurrent_services: [...form.concurrent_services, { service: "", provider: "", frequency: "" }] })} className="text-sm text-indigo-600 hover:text-indigo-800 font-medium">+ Add Service</button>
+          <button
+            type="button"
+            onClick={() =>
+              update({
+                concurrent_services: [
+                  ...form.concurrent_services,
+                  { service: "", provider: "", frequency: "" },
+                ],
+              })
+            }
+            className="text-sm text-indigo-600 hover:text-indigo-800 font-medium"
+          >
+            + Add Service
+          </button>
         </div>
       </fieldset>
     </div>
@@ -318,10 +569,22 @@ function TreatmentPlanEditPage() {
   const renderFamilyTab = () => (
     <div className="space-y-5">
       <Field label="Family History">
-        <textarea value={form.family_history} onChange={(e) => update({ family_history: e.target.value })} className="input" rows={4} placeholder="Family composition, dynamics, relevant medical/developmental history of siblings and parents..." />
+        <textarea
+          value={form.family_history}
+          onChange={(e) => update({ family_history: e.target.value })}
+          className="input"
+          rows={4}
+          placeholder="Family composition, dynamics, relevant medical/developmental history of siblings and parents..."
+        />
       </Field>
       <Field label="School Information">
-        <textarea value={form.school_info} onChange={(e) => update({ school_info: e.target.value })} className="input" rows={4} placeholder="Current school setting, grade level, classroom type (general ed, special ed, inclusion), IEP/504 status, current supports and accommodations..." />
+        <textarea
+          value={form.school_info}
+          onChange={(e) => update({ school_info: e.target.value })}
+          className="input"
+          rows={4}
+          placeholder="Current school setting, grade level, classroom type (general ed, special ed, inclusion), IEP/504 status, current supports and accommodations..."
+        />
       </Field>
     </div>
   );
@@ -329,31 +592,122 @@ function TreatmentPlanEditPage() {
   const renderBehaviorTab = () => (
     <div className="space-y-5">
       <fieldset>
-        <legend className="block text-sm font-medium text-gray-700 mb-2">Maladaptive Behaviors</legend>
+        <legend className="block text-sm font-medium text-gray-700 mb-2">
+          Maladaptive Behaviors
+        </legend>
         <div className="space-y-3">
           {form.maladaptive_behaviors.map((b, i) => (
-            <div key={i} className="rounded border border-gray-200 p-3 space-y-2">
+            <div
+              key={i}
+              className="rounded border border-gray-200 p-3 space-y-2"
+            >
               <div className="flex justify-between items-start">
-                <span className="text-xs font-medium text-gray-500">Behavior #{i + 1}</span>
-                <button type="button" onClick={() => update({ maladaptive_behaviors: form.maladaptive_behaviors.filter((_, j) => j !== i) })} className="text-red-400 hover:text-red-600 text-sm">Remove</button>
+                <span className="text-xs font-medium text-gray-500">
+                  Behavior #{i + 1}
+                </span>
+                <button
+                  type="button"
+                  onClick={() =>
+                    update({
+                      maladaptive_behaviors: form.maladaptive_behaviors.filter(
+                        (_, j) => j !== i,
+                      ),
+                    })
+                  }
+                  className="text-red-400 hover:text-red-600 text-sm"
+                >
+                  Remove
+                </button>
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                <input value={b.behavior} onChange={(e) => { const n = [...form.maladaptive_behaviors]; n[i] = { ...n[i], behavior: e.target.value }; update({ maladaptive_behaviors: n }); }} className="input" placeholder="Behavior name (e.g. Aggression)" />
-                <input value={b.topography} onChange={(e) => { const n = [...form.maladaptive_behaviors]; n[i] = { ...n[i], topography: e.target.value }; update({ maladaptive_behaviors: n }); }} className="input" placeholder="Topography (e.g. Hitting, kicking)" />
+                <input
+                  value={b.behavior}
+                  onChange={(e) => {
+                    const n = [...form.maladaptive_behaviors];
+                    n[i] = { ...n[i], behavior: e.target.value };
+                    update({ maladaptive_behaviors: n });
+                  }}
+                  className="input"
+                  placeholder="Behavior name (e.g. Aggression)"
+                />
+                <input
+                  value={b.topography}
+                  onChange={(e) => {
+                    const n = [...form.maladaptive_behaviors];
+                    n[i] = { ...n[i], topography: e.target.value };
+                    update({ maladaptive_behaviors: n });
+                  }}
+                  className="input"
+                  placeholder="Topography (e.g. Hitting, kicking)"
+                />
               </div>
               <div className="grid grid-cols-3 gap-2">
-                <input value={b.frequency} onChange={(e) => { const n = [...form.maladaptive_behaviors]; n[i] = { ...n[i], frequency: e.target.value }; update({ maladaptive_behaviors: n }); }} className="input" placeholder="Frequency" />
-                <input value={b.intensity} onChange={(e) => { const n = [...form.maladaptive_behaviors]; n[i] = { ...n[i], intensity: e.target.value }; update({ maladaptive_behaviors: n }); }} className="input" placeholder="Intensity" />
-                <input value={b.duration} onChange={(e) => { const n = [...form.maladaptive_behaviors]; n[i] = { ...n[i], duration: e.target.value }; update({ maladaptive_behaviors: n }); }} className="input" placeholder="Duration" />
+                <input
+                  value={b.frequency}
+                  onChange={(e) => {
+                    const n = [...form.maladaptive_behaviors];
+                    n[i] = { ...n[i], frequency: e.target.value };
+                    update({ maladaptive_behaviors: n });
+                  }}
+                  className="input"
+                  placeholder="Frequency"
+                />
+                <input
+                  value={b.intensity}
+                  onChange={(e) => {
+                    const n = [...form.maladaptive_behaviors];
+                    n[i] = { ...n[i], intensity: e.target.value };
+                    update({ maladaptive_behaviors: n });
+                  }}
+                  className="input"
+                  placeholder="Intensity"
+                />
+                <input
+                  value={b.duration}
+                  onChange={(e) => {
+                    const n = [...form.maladaptive_behaviors];
+                    n[i] = { ...n[i], duration: e.target.value };
+                    update({ maladaptive_behaviors: n });
+                  }}
+                  className="input"
+                  placeholder="Duration"
+                />
               </div>
             </div>
           ))}
-          <button type="button" onClick={() => update({ maladaptive_behaviors: [...form.maladaptive_behaviors, { behavior: "", topography: "", frequency: "", intensity: "", duration: "" }] })} className="text-sm text-indigo-600 hover:text-indigo-800 font-medium">+ Add Behavior</button>
+          <button
+            type="button"
+            onClick={() =>
+              update({
+                maladaptive_behaviors: [
+                  ...form.maladaptive_behaviors,
+                  {
+                    behavior: "",
+                    topography: "",
+                    frequency: "",
+                    intensity: "",
+                    duration: "",
+                  },
+                ],
+              })
+            }
+            className="text-sm text-indigo-600 hover:text-indigo-800 font-medium"
+          >
+            + Add Behavior
+          </button>
         </div>
       </fieldset>
 
       <Field label="Behavior Intervention Plan (BIP)">
-        <textarea value={form.behavior_intervention_plan} onChange={(e) => update({ behavior_intervention_plan: e.target.value })} className="input" rows={6} placeholder="Antecedent interventions, consequence strategies, replacement behaviors, reinforcement procedures, crisis plan..." />
+        <textarea
+          value={form.behavior_intervention_plan}
+          onChange={(e) =>
+            update({ behavior_intervention_plan: e.target.value })
+          }
+          className="input"
+          rows={6}
+          placeholder="Antecedent interventions, consequence strategies, replacement behaviors, reinforcement procedures, crisis plan..."
+        />
       </Field>
     </div>
   );
@@ -363,28 +717,123 @@ function TreatmentPlanEditPage() {
       {form.skill_acquisition_goals.map((g, i) => (
         <div key={i} className="rounded border border-gray-200 p-3 space-y-2">
           <div className="flex justify-between items-start">
-            <span className="text-xs font-medium text-gray-500">Goal #{i + 1}</span>
-            <button type="button" onClick={() => update({ skill_acquisition_goals: form.skill_acquisition_goals.filter((_, j) => j !== i) })} className="text-red-400 hover:text-red-600 text-sm">Remove</button>
+            <span className="text-xs font-medium text-gray-500">
+              Goal #{i + 1}
+            </span>
+            <button
+              type="button"
+              onClick={() =>
+                update({
+                  skill_acquisition_goals: form.skill_acquisition_goals.filter(
+                    (_, j) => j !== i,
+                  ),
+                })
+              }
+              className="text-red-400 hover:text-red-600 text-sm"
+            >
+              Remove
+            </button>
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-            <select value={g.domain} onChange={(e) => { const n = [...form.skill_acquisition_goals]; n[i] = { ...n[i], domain: e.target.value }; update({ skill_acquisition_goals: n }); }} className="input">
+            <select
+              value={g.domain}
+              onChange={(e) => {
+                const n = [...form.skill_acquisition_goals];
+                n[i] = { ...n[i], domain: e.target.value };
+                update({ skill_acquisition_goals: n });
+              }}
+              className="input"
+            >
               <option value="">— Select Domain —</option>
-              {DOMAINS.map((d) => <option key={d} value={d}>{d}</option>)}
+              {DOMAINS.map((d) => (
+                <option key={d} value={d}>
+                  {d}
+                </option>
+              ))}
             </select>
-            <select value={g.measurement} onChange={(e) => { const n = [...form.skill_acquisition_goals]; n[i] = { ...n[i], measurement: e.target.value }; update({ skill_acquisition_goals: n }); }} className="input">
+            <select
+              value={g.measurement}
+              onChange={(e) => {
+                const n = [...form.skill_acquisition_goals];
+                n[i] = { ...n[i], measurement: e.target.value };
+                update({ skill_acquisition_goals: n });
+              }}
+              className="input"
+            >
               <option value="">— Measurement —</option>
-              {MEASUREMENTS.map((m) => <option key={m} value={m}>{m}</option>)}
+              {MEASUREMENTS.map((m) => (
+                <option key={m} value={m}>
+                  {m}
+                </option>
+              ))}
             </select>
           </div>
-          <textarea value={g.description} onChange={(e) => { const n = [...form.skill_acquisition_goals]; n[i] = { ...n[i], description: e.target.value }; update({ skill_acquisition_goals: n }); }} className="input" rows={2} placeholder="Goal description (use SMART framework)" />
+          <textarea
+            value={g.description}
+            onChange={(e) => {
+              const n = [...form.skill_acquisition_goals];
+              n[i] = { ...n[i], description: e.target.value };
+              update({ skill_acquisition_goals: n });
+            }}
+            className="input"
+            rows={2}
+            placeholder="Goal description (use SMART framework)"
+          />
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-            <input value={g.baseline} onChange={(e) => { const n = [...form.skill_acquisition_goals]; n[i] = { ...n[i], baseline: e.target.value }; update({ skill_acquisition_goals: n }); }} className="input" placeholder="Baseline" />
-            <input value={g.target} onChange={(e) => { const n = [...form.skill_acquisition_goals]; n[i] = { ...n[i], target: e.target.value }; update({ skill_acquisition_goals: n }); }} className="input" placeholder="Target" />
-            <input type="date" value={g.target_date} onChange={(e) => { const n = [...form.skill_acquisition_goals]; n[i] = { ...n[i], target_date: e.target.value }; update({ skill_acquisition_goals: n }); }} className="input" />
+            <input
+              value={g.baseline}
+              onChange={(e) => {
+                const n = [...form.skill_acquisition_goals];
+                n[i] = { ...n[i], baseline: e.target.value };
+                update({ skill_acquisition_goals: n });
+              }}
+              className="input"
+              placeholder="Baseline"
+            />
+            <input
+              value={g.target}
+              onChange={(e) => {
+                const n = [...form.skill_acquisition_goals];
+                n[i] = { ...n[i], target: e.target.value };
+                update({ skill_acquisition_goals: n });
+              }}
+              className="input"
+              placeholder="Target"
+            />
+            <input
+              type="date"
+              value={g.target_date}
+              onChange={(e) => {
+                const n = [...form.skill_acquisition_goals];
+                n[i] = { ...n[i], target_date: e.target.value };
+                update({ skill_acquisition_goals: n });
+              }}
+              className="input"
+            />
           </div>
         </div>
       ))}
-      <button type="button" onClick={() => update({ skill_acquisition_goals: [...form.skill_acquisition_goals, { domain: "", description: "", measurement: "", baseline: "", target: "", target_date: "" }] })} className="text-sm text-indigo-600 hover:text-indigo-800 font-medium">+ Add Skill Goal</button>
+      <button
+        type="button"
+        onClick={() =>
+          update({
+            skill_acquisition_goals: [
+              ...form.skill_acquisition_goals,
+              {
+                domain: "",
+                description: "",
+                measurement: "",
+                baseline: "",
+                target: "",
+                target_date: "",
+              },
+            ],
+          })
+        }
+        className="text-sm text-indigo-600 hover:text-indigo-800 font-medium"
+      >
+        + Add Skill Goal
+      </button>
     </div>
   );
 
@@ -393,27 +842,73 @@ function TreatmentPlanEditPage() {
       {/* Assessment scores summary (read-only) */}
       {assessment && assessment.raw_scores && (
         <div className="rounded-md bg-gray-50 p-4">
-          <h3 className="text-sm font-semibold text-gray-700 mb-3">Assessment Scores — {assessment.tool_name}</h3>
+          <h3 className="text-sm font-semibold text-gray-700 mb-3">
+            Assessment Scores — {assessment.tool_name}
+          </h3>
           {(() => {
             const rs = assessment.raw_scores as Record<string, unknown>;
             const c = (rs._computed as Record<string, unknown>) ?? null;
-            if (!c) return <p className="text-sm text-gray-500">No computed scores available.</p>;
+            if (!c)
+              return (
+                <p className="text-sm text-gray-500">
+                  No computed scores available.
+                </p>
+              );
             return (
               <dl className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm">
                 {c.milestones && typeof c.milestones === "object" && (
-                  <div><dt className="text-xs text-gray-500">Milestones</dt><dd className="font-medium">{(c.milestones as Record<string,unknown>).overallTotal ?? "—"} / {(c.milestones as Record<string,unknown>).maxOverall ?? 170}</dd></div>
+                  <div>
+                    <dt className="text-xs text-gray-500">Milestones</dt>
+                    <dd className="font-medium">
+                      {(c.milestones as Record<string, unknown>).overallTotal ??
+                        "—"}{" "}
+                      /{" "}
+                      {(c.milestones as Record<string, unknown>).maxOverall ??
+                        170}
+                    </dd>
+                  </div>
                 )}
                 {c.barriers && typeof c.barriers === "object" && (
-                  <div><dt className="text-xs text-gray-500">Barriers</dt><dd className="font-medium">{(c.barriers as Record<string,unknown>).total ?? "—"} / {(c.barriers as Record<string,unknown>).max ?? 96}</dd></div>
+                  <div>
+                    <dt className="text-xs text-gray-500">Barriers</dt>
+                    <dd className="font-medium">
+                      {(c.barriers as Record<string, unknown>).total ?? "—"} /{" "}
+                      {(c.barriers as Record<string, unknown>).max ?? 96}
+                    </dd>
+                  </div>
                 )}
                 {c.transition && typeof c.transition === "object" && (
-                  <div><dt className="text-xs text-gray-500">Transition</dt><dd className="font-medium">{(c.transition as Record<string,unknown>).total ?? "—"} / {(c.transition as Record<string,unknown>).max ?? 36}</dd></div>
+                  <div>
+                    <dt className="text-xs text-gray-500">Transition</dt>
+                    <dd className="font-medium">
+                      {(c.transition as Record<string, unknown>).total ?? "—"} /{" "}
+                      {(c.transition as Record<string, unknown>).max ?? 36}
+                    </dd>
+                  </div>
                 )}
                 {c.eesa && typeof c.eesa === "object" && (
-                  <div><dt className="text-xs text-gray-500">EESA</dt><dd className="font-medium">{(c.eesa as Record<string,unknown>).overallTotal ?? "—"}</dd></div>
+                  <div>
+                    <dt className="text-xs text-gray-500">EESA</dt>
+                    <dd className="font-medium">
+                      {(c.eesa as Record<string, unknown>).overallTotal ?? "—"}
+                    </dd>
+                  </div>
                 )}
                 {c.task_analysis && typeof c.task_analysis === "object" && (
-                  <div><dt className="text-xs text-gray-500">Task Analysis</dt><dd className="font-medium">{(c.task_analysis as Record<string,unknown>).overallPercentage ?? "—"}% ({(c.task_analysis as Record<string,unknown>).totalCompleted ?? 0}/{(c.task_analysis as Record<string,unknown>).totalItems ?? 0})</dd></div>
+                  <div>
+                    <dt className="text-xs text-gray-500">Task Analysis</dt>
+                    <dd className="font-medium">
+                      {(c.task_analysis as Record<string, unknown>)
+                        .overallPercentage ?? "—"}
+                      % (
+                      {(c.task_analysis as Record<string, unknown>)
+                        .totalCompleted ?? 0}
+                      /
+                      {(c.task_analysis as Record<string, unknown>)
+                        .totalItems ?? 0}
+                      )
+                    </dd>
+                  </div>
                 )}
               </dl>
             );
@@ -422,11 +917,19 @@ function TreatmentPlanEditPage() {
       )}
 
       {!assessment && (
-        <div className="rounded-md bg-gray-50 p-4 text-sm text-gray-500">No assessment linked to this treatment plan.</div>
+        <div className="rounded-md bg-gray-50 p-4 text-sm text-gray-500">
+          No assessment linked to this treatment plan.
+        </div>
       )}
 
       <Field label="Assessment Outcomes Interpretation">
-        <textarea value={form.assessment_outcomes} onChange={(e) => update({ assessment_outcomes: e.target.value })} className="input" rows={6} placeholder="Clinical interpretation of assessment results and how they inform this treatment plan. Describe patterns, strengths, and areas of need..." />
+        <textarea
+          value={form.assessment_outcomes}
+          onChange={(e) => update({ assessment_outcomes: e.target.value })}
+          className="input"
+          rows={6}
+          placeholder="Clinical interpretation of assessment results and how they inform this treatment plan. Describe patterns, strengths, and areas of need..."
+        />
       </Field>
     </div>
   );
@@ -434,37 +937,152 @@ function TreatmentPlanEditPage() {
   const renderParentTab = () => (
     <div className="space-y-5">
       <fieldset>
-        <legend className="block text-sm font-medium text-gray-700 mb-2">Parent Training Goals</legend>
+        <legend className="block text-sm font-medium text-gray-700 mb-2">
+          Parent Training Goals
+        </legend>
         <div className="space-y-2">
           {form.parent_training_goals.map((g, i) => (
             <div key={i} className="flex gap-2 items-start">
-              <input value={g.goal} onChange={(e) => { const n = [...form.parent_training_goals]; n[i] = { ...n[i], goal: e.target.value }; update({ parent_training_goals: n }); }} className="input flex-1" placeholder="Goal description" />
-              <input value={g.method} onChange={(e) => { const n = [...form.parent_training_goals]; n[i] = { ...n[i], method: e.target.value }; update({ parent_training_goals: n }); }} className="input w-36" placeholder="Method" />
-              <input value={g.frequency} onChange={(e) => { const n = [...form.parent_training_goals]; n[i] = { ...n[i], frequency: e.target.value }; update({ parent_training_goals: n }); }} className="input w-28" placeholder="Freq." />
-              <button type="button" onClick={() => update({ parent_training_goals: form.parent_training_goals.filter((_, j) => j !== i) })} className="p-2 text-red-400 hover:text-red-600 text-lg" aria-label="Remove">×</button>
+              <input
+                value={g.goal}
+                onChange={(e) => {
+                  const n = [...form.parent_training_goals];
+                  n[i] = { ...n[i], goal: e.target.value };
+                  update({ parent_training_goals: n });
+                }}
+                className="input flex-1"
+                placeholder="Goal description"
+              />
+              <input
+                value={g.method}
+                onChange={(e) => {
+                  const n = [...form.parent_training_goals];
+                  n[i] = { ...n[i], method: e.target.value };
+                  update({ parent_training_goals: n });
+                }}
+                className="input w-36"
+                placeholder="Method"
+              />
+              <input
+                value={g.frequency}
+                onChange={(e) => {
+                  const n = [...form.parent_training_goals];
+                  n[i] = { ...n[i], frequency: e.target.value };
+                  update({ parent_training_goals: n });
+                }}
+                className="input w-28"
+                placeholder="Freq."
+              />
+              <button
+                type="button"
+                onClick={() =>
+                  update({
+                    parent_training_goals: form.parent_training_goals.filter(
+                      (_, j) => j !== i,
+                    ),
+                  })
+                }
+                className="p-2 text-red-400 hover:text-red-600 text-lg"
+                aria-label="Remove"
+              >
+                ×
+              </button>
             </div>
           ))}
-          <button type="button" onClick={() => update({ parent_training_goals: [...form.parent_training_goals, { goal: "", method: "", frequency: "" }] })} className="text-sm text-indigo-600 hover:text-indigo-800 font-medium">+ Add Goal</button>
+          <button
+            type="button"
+            onClick={() =>
+              update({
+                parent_training_goals: [
+                  ...form.parent_training_goals,
+                  { goal: "", method: "", frequency: "" },
+                ],
+              })
+            }
+            className="text-sm text-indigo-600 hover:text-indigo-800 font-medium"
+          >
+            + Add Goal
+          </button>
         </div>
       </fieldset>
 
       <fieldset>
-        <legend className="block text-sm font-medium text-gray-700 mb-2">Service Coordination Goals</legend>
+        <legend className="block text-sm font-medium text-gray-700 mb-2">
+          Service Coordination Goals
+        </legend>
         <div className="space-y-2">
           {form.service_coordination_goals.map((g, i) => (
             <div key={i} className="flex gap-2 items-start">
-              <input value={g.provider} onChange={(e) => { const n = [...form.service_coordination_goals]; n[i] = { ...n[i], provider: e.target.value }; update({ service_coordination_goals: n }); }} className="input flex-1" placeholder="Provider/Service" />
-              <input value={g.goal} onChange={(e) => { const n = [...form.service_coordination_goals]; n[i] = { ...n[i], goal: e.target.value }; update({ service_coordination_goals: n }); }} className="input flex-1" placeholder="Coordination goal" />
-              <input value={g.method} onChange={(e) => { const n = [...form.service_coordination_goals]; n[i] = { ...n[i], method: e.target.value }; update({ service_coordination_goals: n }); }} className="input w-36" placeholder="Method" />
-              <button type="button" onClick={() => update({ service_coordination_goals: form.service_coordination_goals.filter((_, j) => j !== i) })} className="p-2 text-red-400 hover:text-red-600 text-lg" aria-label="Remove">×</button>
+              <input
+                value={g.provider}
+                onChange={(e) => {
+                  const n = [...form.service_coordination_goals];
+                  n[i] = { ...n[i], provider: e.target.value };
+                  update({ service_coordination_goals: n });
+                }}
+                className="input flex-1"
+                placeholder="Provider/Service"
+              />
+              <input
+                value={g.goal}
+                onChange={(e) => {
+                  const n = [...form.service_coordination_goals];
+                  n[i] = { ...n[i], goal: e.target.value };
+                  update({ service_coordination_goals: n });
+                }}
+                className="input flex-1"
+                placeholder="Coordination goal"
+              />
+              <input
+                value={g.method}
+                onChange={(e) => {
+                  const n = [...form.service_coordination_goals];
+                  n[i] = { ...n[i], method: e.target.value };
+                  update({ service_coordination_goals: n });
+                }}
+                className="input w-36"
+                placeholder="Method"
+              />
+              <button
+                type="button"
+                onClick={() =>
+                  update({
+                    service_coordination_goals:
+                      form.service_coordination_goals.filter((_, j) => j !== i),
+                  })
+                }
+                className="p-2 text-red-400 hover:text-red-600 text-lg"
+                aria-label="Remove"
+              >
+                ×
+              </button>
             </div>
           ))}
-          <button type="button" onClick={() => update({ service_coordination_goals: [...form.service_coordination_goals, { provider: "", goal: "", method: "" }] })} className="text-sm text-indigo-600 hover:text-indigo-800 font-medium">+ Add Coordination Goal</button>
+          <button
+            type="button"
+            onClick={() =>
+              update({
+                service_coordination_goals: [
+                  ...form.service_coordination_goals,
+                  { provider: "", goal: "", method: "" },
+                ],
+              })
+            }
+            className="text-sm text-indigo-600 hover:text-indigo-800 font-medium"
+          >
+            + Add Coordination Goal
+          </button>
         </div>
       </fieldset>
 
       <Field label="Discharge Criteria">
-        <textarea value={form.discharge_criteria} onChange={(e) => update({ discharge_criteria: e.target.value })} className="input" rows={3} placeholder="Criteria for discharge from ABA services (e.g., mastery of treatment goals, reduction of maladaptive behaviors to acceptable levels, transition to less intensive services)..." />
+        <textarea
+          value={form.discharge_criteria}
+          onChange={(e) => update({ discharge_criteria: e.target.value })}
+          className="input"
+          rows={3}
+          placeholder="Criteria for discharge from ABA services (e.g., mastery of treatment goals, reduction of maladaptive behaviors to acceptable levels, transition to less intensive services)..."
+        />
       </Field>
     </div>
   );
@@ -472,38 +1090,190 @@ function TreatmentPlanEditPage() {
   const renderServicesTab = () => (
     <div className="space-y-5">
       <fieldset>
-        <legend className="block text-sm font-medium text-gray-700 mb-2">Requested Services</legend>
+        <legend className="block text-sm font-medium text-gray-700 mb-2">
+          Requested Services
+        </legend>
         <div className="space-y-2">
           {form.requested_services.map((s, i) => (
             <div key={i} className="flex flex-wrap gap-2 items-start">
-              <input value={s.service_name} onChange={(e) => { const n = [...form.requested_services]; n[i] = { ...n[i], service_name: e.target.value }; update({ requested_services: n }); }} className="input w-36" placeholder="Service" />
-              <input value={s.cpt_code} onChange={(e) => { const n = [...form.requested_services]; n[i] = { ...n[i], cpt_code: e.target.value }; update({ requested_services: n }); }} className="input w-24" placeholder="CPT" />
-              <input value={s.frequency} onChange={(e) => { const n = [...form.requested_services]; n[i] = { ...n[i], frequency: e.target.value }; update({ requested_services: n }); }} className="input w-28" placeholder="Freq." />
-              <input value={s.duration} onChange={(e) => { const n = [...form.requested_services]; n[i] = { ...n[i], duration: e.target.value }; update({ requested_services: n }); }} className="input w-28" placeholder="Duration" />
-              <input type="number" value={s.hours_per_week ?? ""} onChange={(e) => { const n = [...form.requested_services]; n[i] = { ...n[i], hours_per_week: e.target.value ? Number(e.target.value) : undefined }; update({ requested_services: n }); }} className="input w-20" placeholder="Hrs/wk" />
-              <button type="button" onClick={() => update({ requested_services: form.requested_services.filter((_, j) => j !== i) })} className="p-2 text-red-400 hover:text-red-600 text-lg" aria-label="Remove">×</button>
+              <input
+                value={s.service_name}
+                onChange={(e) => {
+                  const n = [...form.requested_services];
+                  n[i] = { ...n[i], service_name: e.target.value };
+                  update({ requested_services: n });
+                }}
+                className="input w-36"
+                placeholder="Service"
+              />
+              <input
+                value={s.cpt_code}
+                onChange={(e) => {
+                  const n = [...form.requested_services];
+                  n[i] = { ...n[i], cpt_code: e.target.value };
+                  update({ requested_services: n });
+                }}
+                className="input w-24"
+                placeholder="CPT"
+              />
+              <input
+                value={s.frequency}
+                onChange={(e) => {
+                  const n = [...form.requested_services];
+                  n[i] = { ...n[i], frequency: e.target.value };
+                  update({ requested_services: n });
+                }}
+                className="input w-28"
+                placeholder="Freq."
+              />
+              <input
+                value={s.duration}
+                onChange={(e) => {
+                  const n = [...form.requested_services];
+                  n[i] = { ...n[i], duration: e.target.value };
+                  update({ requested_services: n });
+                }}
+                className="input w-28"
+                placeholder="Duration"
+              />
+              <input
+                type="number"
+                value={s.hours_per_week ?? ""}
+                onChange={(e) => {
+                  const n = [...form.requested_services];
+                  n[i] = {
+                    ...n[i],
+                    hours_per_week: e.target.value
+                      ? Number(e.target.value)
+                      : undefined,
+                  };
+                  update({ requested_services: n });
+                }}
+                className="input w-20"
+                placeholder="Hrs/wk"
+              />
+              <button
+                type="button"
+                onClick={() =>
+                  update({
+                    requested_services: form.requested_services.filter(
+                      (_, j) => j !== i,
+                    ),
+                  })
+                }
+                className="p-2 text-red-400 hover:text-red-600 text-lg"
+                aria-label="Remove"
+              >
+                ×
+              </button>
             </div>
           ))}
-          <button type="button" onClick={() => update({ requested_services: [...form.requested_services, { service_name: "", cpt_code: "", frequency: "", duration: "", hours_per_week: undefined }] })} className="text-sm text-indigo-600 hover:text-indigo-800 font-medium">+ Add Service</button>
+          <button
+            type="button"
+            onClick={() =>
+              update({
+                requested_services: [
+                  ...form.requested_services,
+                  {
+                    service_name: "",
+                    cpt_code: "",
+                    frequency: "",
+                    duration: "",
+                    hours_per_week: undefined,
+                  },
+                ],
+              })
+            }
+            className="text-sm text-indigo-600 hover:text-indigo-800 font-medium"
+          >
+            + Add Service
+          </button>
         </div>
       </fieldset>
 
       <fieldset>
-        <legend className="block text-sm font-medium text-gray-700 mb-2">Therapy Schedule</legend>
+        <legend className="block text-sm font-medium text-gray-700 mb-2">
+          Therapy Schedule
+        </legend>
         <div className="space-y-2">
           {form.therapy_schedule.map((s, i) => (
             <div key={i} className="flex flex-wrap gap-2 items-start">
-              <select value={s.day} onChange={(e) => { const n = [...form.therapy_schedule]; n[i] = { ...n[i], day: e.target.value }; update({ therapy_schedule: n }); }} className="input w-32">
+              <select
+                value={s.day}
+                onChange={(e) => {
+                  const n = [...form.therapy_schedule];
+                  n[i] = { ...n[i], day: e.target.value };
+                  update({ therapy_schedule: n });
+                }}
+                className="input w-32"
+              >
                 <option value="">— Day —</option>
-                {DAYS.map((d) => <option key={d} value={d}>{d}</option>)}
+                {DAYS.map((d) => (
+                  <option key={d} value={d}>
+                    {d}
+                  </option>
+                ))}
               </select>
-              <input value={s.time} onChange={(e) => { const n = [...form.therapy_schedule]; n[i] = { ...n[i], time: e.target.value }; update({ therapy_schedule: n }); }} className="input w-32" placeholder="Time (e.g. 9-11)" />
-              <input value={s.location} onChange={(e) => { const n = [...form.therapy_schedule]; n[i] = { ...n[i], location: e.target.value }; update({ therapy_schedule: n }); }} className="input w-28" placeholder="Location" />
-              <input value={s.service_type} onChange={(e) => { const n = [...form.therapy_schedule]; n[i] = { ...n[i], service_type: e.target.value }; update({ therapy_schedule: n }); }} className="input w-36" placeholder="Service type" />
-              <button type="button" onClick={() => update({ therapy_schedule: form.therapy_schedule.filter((_, j) => j !== i) })} className="p-2 text-red-400 hover:text-red-600 text-lg" aria-label="Remove">×</button>
+              <input
+                value={s.time}
+                onChange={(e) => {
+                  const n = [...form.therapy_schedule];
+                  n[i] = { ...n[i], time: e.target.value };
+                  update({ therapy_schedule: n });
+                }}
+                className="input w-32"
+                placeholder="Time (e.g. 9-11)"
+              />
+              <input
+                value={s.location}
+                onChange={(e) => {
+                  const n = [...form.therapy_schedule];
+                  n[i] = { ...n[i], location: e.target.value };
+                  update({ therapy_schedule: n });
+                }}
+                className="input w-28"
+                placeholder="Location"
+              />
+              <input
+                value={s.service_type}
+                onChange={(e) => {
+                  const n = [...form.therapy_schedule];
+                  n[i] = { ...n[i], service_type: e.target.value };
+                  update({ therapy_schedule: n });
+                }}
+                className="input w-36"
+                placeholder="Service type"
+              />
+              <button
+                type="button"
+                onClick={() =>
+                  update({
+                    therapy_schedule: form.therapy_schedule.filter(
+                      (_, j) => j !== i,
+                    ),
+                  })
+                }
+                className="p-2 text-red-400 hover:text-red-600 text-lg"
+                aria-label="Remove"
+              >
+                ×
+              </button>
             </div>
           ))}
-          <button type="button" onClick={() => update({ therapy_schedule: [...form.therapy_schedule, { day: "", time: "", location: "", service_type: "" }] })} className="text-sm text-indigo-600 hover:text-indigo-800 font-medium">+ Add Schedule Entry</button>
+          <button
+            type="button"
+            onClick={() =>
+              update({
+                therapy_schedule: [
+                  ...form.therapy_schedule,
+                  { day: "", time: "", location: "", service_type: "" },
+                ],
+              })
+            }
+            className="text-sm text-indigo-600 hover:text-indigo-800 font-medium"
+          >
+            + Add Schedule Entry
+          </button>
         </div>
       </fieldset>
     </div>
@@ -512,27 +1282,55 @@ function TreatmentPlanEditPage() {
   const renderReviewTab = () => (
     <div className="space-y-5">
       <div className="rounded-md bg-gray-50 p-4">
-        <h3 className="text-sm font-semibold text-gray-700 mb-2">Plan Summary</h3>
+        <h3 className="text-sm font-semibold text-gray-700 mb-2">
+          Plan Summary
+        </h3>
         <div className="text-sm text-gray-600 space-y-1">
-          <p><strong>Client:</strong> {client?.name ?? "—"}</p>
-          <p><strong>Status:</strong> {form.status}</p>
-          <p><strong>Diagnosis:</strong> {form.diagnosis || "—"}</p>
-          <p><strong>Goals:</strong> {form.skill_acquisition_goals.length} skill acquisition, {form.parent_training_goals.length} parent training</p>
-          <p><strong>Behaviors:</strong> {form.maladaptive_behaviors.length} identified</p>
-          <p><strong>Services:</strong> {form.requested_services.length} requested</p>
-          <p><strong>Schedule entries:</strong> {form.therapy_schedule.length}</p>
+          <p>
+            <strong>Client:</strong> {client?.name ?? "—"}
+          </p>
+          <p>
+            <strong>Status:</strong> {form.status}
+          </p>
+          <p>
+            <strong>Diagnosis:</strong> {form.diagnosis || "—"}
+          </p>
+          <p>
+            <strong>Goals:</strong> {form.skill_acquisition_goals.length} skill
+            acquisition, {form.parent_training_goals.length} parent training
+          </p>
+          <p>
+            <strong>Behaviors:</strong> {form.maladaptive_behaviors.length}{" "}
+            identified
+          </p>
+          <p>
+            <strong>Services:</strong> {form.requested_services.length}{" "}
+            requested
+          </p>
+          <p>
+            <strong>Schedule entries:</strong> {form.therapy_schedule.length}
+          </p>
         </div>
       </div>
 
       <Field label="Status">
-        <select value={form.status} onChange={(e) => update({ status: e.target.value })} className="input max-w-xs">
-          {PLAN_STATUSES.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
+        <select
+          value={form.status}
+          onChange={(e) => update({ status: e.target.value })}
+          className="input max-w-xs"
+        >
+          {PLAN_STATUSES.map((s) => (
+            <option key={s.value} value={s.value}>
+              {s.label}
+            </option>
+          ))}
         </select>
       </Field>
 
       <div className="rounded-md bg-indigo-50 p-4 text-sm text-indigo-700">
-        <strong>Note:</strong> Changing status to &quot;Ready for Review&quot; sends the plan for clinical review.
-        After signatures are collected, it can be marked &quot;Approved&quot; and then &quot;Active&quot;.
+        <strong>Note:</strong> Changing status to &quot;Ready for Review&quot;
+        sends the plan for clinical review. After signatures are collected, it
+        can be marked &quot;Approved&quot; and then &quot;Active&quot;.
       </div>
     </div>
   );
@@ -543,18 +1341,28 @@ function TreatmentPlanEditPage() {
       <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <div className="flex items-center gap-3">
-            <Link to="/treatment-plans" className="text-sm text-gray-500 hover:text-gray-700">&larr; Plans</Link>
+            <Link
+              to="/treatment-plans"
+              className="text-sm text-gray-500 hover:text-gray-700"
+            >
+              &larr; Plans
+            </Link>
             <h1 className="text-xl font-bold text-gray-900">
               Edit Plan: {client?.name ?? "Loading..."}
             </h1>
             {statusBadge(plan.status)}
           </div>
           <p className="mt-1 text-sm text-gray-500">
-            Created {new Date(plan.created_at).toLocaleDateString()} · Updated {new Date(plan.updated_at).toLocaleDateString()}
+            Created {new Date(plan.created_at).toLocaleDateString()} · Updated{" "}
+            {new Date(plan.updated_at).toLocaleDateString()}
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <Link to="/treatment-plans/$id" params={{ id: plan.id }} className="rounded-md bg-white px-3 py-2 text-sm font-medium text-gray-700 shadow-sm ring-1 ring-inset ring-gray-300 hover:bg-gray-50 transition-colors">
+          <Link
+            to="/treatment-plans/$id"
+            params={{ id: plan.id }}
+            className="rounded-md bg-white px-3 py-2 text-sm font-medium text-gray-700 shadow-sm ring-1 ring-inset ring-gray-300 hover:bg-gray-50 transition-colors"
+          >
             View
           </Link>
           <button
@@ -564,26 +1372,69 @@ function TreatmentPlanEditPage() {
             className="inline-flex items-center gap-2 rounded-md bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 disabled:opacity-60 transition-colors"
           >
             {saving ? (
-              <><svg className="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg> Saving&hellip;</>
-            ) : "Save Plan"}
+              <>
+                <svg
+                  className="h-4 w-4 animate-spin"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  aria-hidden="true"
+                >
+                  <circle
+                    className="opacity-25"
+                    cx="12"
+                    cy="12"
+                    r="10"
+                    stroke="currentColor"
+                    strokeWidth="4"
+                  />
+                  <path
+                    className="opacity-75"
+                    fill="currentColor"
+                    d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
+                  />
+                </svg>{" "}
+                Saving&hellip;
+              </>
+            ) : (
+              "Save Plan"
+            )}
           </button>
         </div>
       </div>
 
       {saveMsg && (
-        <div className={`mb-4 rounded-md px-4 py-2 text-sm ${saveMsg === "Saved!" ? "bg-green-50 text-green-700" : "bg-red-50 text-red-700"}`}>{saveMsg}</div>
+        <div
+          className={`mb-4 rounded-md px-4 py-2 text-sm ${saveMsg === "Saved!" ? "bg-green-50 text-green-700" : "bg-red-50 text-red-700"}`}
+        >
+          {saveMsg}
+        </div>
       )}
 
       {dirty && !saving && (
         <div className="mb-4 rounded-md bg-yellow-50 px-4 py-2 text-sm text-yellow-700 flex items-center gap-2">
-          <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 3.75h.008v.008H12v-.008Z"/></svg>
+          <svg
+            className="h-4 w-4"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+            strokeWidth={2}
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              d="M12 9v3.75m9-.75a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 3.75h.008v.008H12v-.008Z"
+            />
+          </svg>
           You have unsaved changes
         </div>
       )}
 
       {/* Tab bar */}
       <div className="border-b border-gray-200 mb-6">
-        <nav className="-mb-px flex space-x-2 overflow-x-auto" aria-label="Form sections">
+        <nav
+          className="-mb-px flex space-x-2 overflow-x-auto"
+          aria-label="Form sections"
+        >
           {TABS.map((tab) => (
             <button
               key={tab.id}
@@ -622,15 +1473,47 @@ function TreatmentPlanEditPage() {
           className="inline-flex items-center gap-2 rounded-md bg-indigo-600 px-6 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 disabled:opacity-60 transition-colors"
         >
           {saving ? (
-            <><svg className="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg> Saving&hellip;</>
-          ) : "Save Plan"}
+            <>
+              <svg
+                className="h-4 w-4 animate-spin"
+                viewBox="0 0 24 24"
+                fill="none"
+                aria-hidden="true"
+              >
+                <circle
+                  className="opacity-25"
+                  cx="12"
+                  cy="12"
+                  r="10"
+                  stroke="currentColor"
+                  strokeWidth="4"
+                />
+                <path
+                  className="opacity-75"
+                  fill="currentColor"
+                  d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
+                />
+              </svg>{" "}
+              Saving&hellip;
+            </>
+          ) : (
+            "Save Plan"
+          )}
         </button>
       </div>
     </div>
   );
 }
 
-function Field({ label, required, children }: { label: string; required?: boolean; children: React.ReactNode }) {
+function Field({
+  label,
+  required,
+  children,
+}: {
+  label: string;
+  required?: boolean;
+  children: React.ReactNode;
+}) {
   return (
     <div>
       <label className="block text-sm font-medium text-gray-700 mb-1">
