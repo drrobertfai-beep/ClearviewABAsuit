@@ -10,7 +10,7 @@ export const Route = createFileRoute("/assessments/new")({
   component: NewAssessmentPage,
   loader: async () => {
     try {
-      return await listClientsFn({ status: "active" });
+      return await listClientsFn({ data: { status: "active" } });
     } catch {
       return [];
     }
@@ -35,7 +35,7 @@ function NewAssessmentPage() {
   // Reload clients if empty
   useEffect(() => {
     if (initialClients.length === 0) {
-      listClientsFn({ status: "active" })
+      listClientsFn({ data: { status: "active" } })
         .then(setClients)
         .catch(() => {});
     }
@@ -51,10 +51,21 @@ function NewAssessmentPage() {
   const selectedClient = clients.find((c) => c.id === selectedClientId);
 
   const toolOptions = [
-    { value: "VB-MAPP", label: "VB-MAPP — Verbal Behavior Milestones Assessment and Placement Program" },
-    { value: "ABLLS-R", label: "ABLLS-R — Assessment of Basic Language and Learning Skills – Revised" },
+    {
+      value: "VB-MAPP",
+      label:
+        "VB-MAPP — Verbal Behavior Milestones Assessment and Placement Program",
+    },
+    {
+      value: "ABLLS-R",
+      label:
+        "ABLLS-R — Assessment of Basic Language and Learning Skills – Revised",
+    },
     { value: "AFLS", label: "AFLS — Assessment of Functional Living Skills" },
-    { value: "PEAK", label: "PEAK — Promoting the Emergence of Advanced Knowledge" },
+    {
+      value: "PEAK",
+      label: "PEAK — Promoting the Emergence of Advanced Knowledge",
+    },
     { value: "Other", label: "Other / Custom Assessment" },
   ];
 
@@ -65,9 +76,11 @@ function NewAssessmentPage() {
 
     try {
       const assessment = await createAssessmentFn({
-        clientId: selectedClientId,
-        toolName: selectedTool,
-        toolVersion: toolVersion || undefined,
+        data: {
+          clientId: selectedClientId,
+          toolName: selectedTool,
+          toolVersion: toolVersion || undefined,
+        },
       });
 
       // Redirect to the form based on tool
@@ -86,7 +99,7 @@ function NewAssessmentPage() {
       setError(
         err instanceof Error
           ? err.message
-          : "Failed to create assessment. Please try again."
+          : "Failed to create assessment. Please try again.",
       );
     } finally {
       setCreating(false);
@@ -125,9 +138,21 @@ function NewAssessmentPage() {
                 : "bg-green-500 text-white"
             }`}
           >
-            {step === "client" ? "1" : (
-              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="m4.5 12.75 6 6 9-13.5" />
+            {step === "client" ? (
+              "1"
+            ) : (
+              <svg
+                className="h-4 w-4"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                strokeWidth={3}
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="m4.5 12.75 6 6 9-13.5"
+                />
               </svg>
             )}
           </div>

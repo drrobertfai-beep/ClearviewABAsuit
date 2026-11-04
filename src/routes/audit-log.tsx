@@ -31,13 +31,15 @@ function AuditLogPage() {
     setLoading(true);
     try {
       const result = await getAuditLogFn({
-        table: filterTable || undefined,
-        action: filterAction || undefined,
-        user: filterUser || undefined,
-        startDate: filterStartDate || undefined,
-        endDate: filterEndDate || undefined,
-        limit: pageSize,
-        offset: page * pageSize,
+        data: {
+          table: filterTable || undefined,
+          action: filterAction || undefined,
+          user: filterUser || undefined,
+          startDate: filterStartDate || undefined,
+          endDate: filterEndDate || undefined,
+          limit: pageSize,
+          offset: page * pageSize,
+        },
       });
       setEntries(result.entries);
       setTotal(result.total);
@@ -46,7 +48,14 @@ function AuditLogPage() {
     } finally {
       setLoading(false);
     }
-  }, [filterTable, filterAction, filterUser, filterStartDate, filterEndDate, page]);
+  }, [
+    filterTable,
+    filterAction,
+    filterUser,
+    filterStartDate,
+    filterEndDate,
+    page,
+  ]);
 
   useEffect(() => {
     fetchEntries();
@@ -58,7 +67,7 @@ function AuditLogPage() {
     setSelectedEntry(entry);
     setDetailLoading(true);
     try {
-      const full = await getAuditEntryFn({ id: entry.id });
+      const full = await getAuditEntryFn({ data: { id: entry.id } });
       if (full) setSelectedEntry(full);
     } catch {
       // Keep the summary entry
@@ -74,22 +83,33 @@ function AuditLogPage() {
       DELETE: "bg-red-100 text-red-800",
     };
     return (
-      <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${colors[action] ?? "bg-gray-100 text-gray-600"}`}>
+      <span
+        className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${colors[action] ?? "bg-gray-100 text-gray-600"}`}
+      >
         {action}
       </span>
     );
   };
 
   const changesSummary = (entry: AuditEntry): string => {
-    const oldV = typeof entry.old_values === "object" && entry.old_values ? (entry.old_values as Record<string, unknown>) : null;
-    const newV = typeof entry.new_values === "object" && entry.new_values ? (entry.new_values as Record<string, unknown>) : null;
+    const oldV =
+      typeof entry.old_values === "object" && entry.old_values
+        ? (entry.old_values as Record<string, unknown>)
+        : null;
+    const newV =
+      typeof entry.new_values === "object" && entry.new_values
+        ? (entry.new_values as Record<string, unknown>)
+        : null;
 
     if (entry.action === "CREATE") return "Record created";
     if (entry.action === "DELETE") return "Record deleted";
     if (!oldV && !newV) return "No changes";
 
     // Compare old and new
-    const allKeys = new Set([...Object.keys(oldV ?? {}), ...Object.keys(newV ?? {})]);
+    const allKeys = new Set([
+      ...Object.keys(oldV ?? {}),
+      ...Object.keys(newV ?? {}),
+    ]);
     const changedKeys: string[] = [];
     for (const key of allKeys) {
       if (key === "updated_at" || key === "created_at") continue;
@@ -103,20 +123,33 @@ function AuditLogPage() {
   };
 
   const renderDiff = (entry: AuditEntry) => {
-    const oldV = typeof entry.old_values === "object" && entry.old_values ? (entry.old_values as Record<string, unknown>) : null;
-    const newV = typeof entry.new_values === "object" && entry.new_values ? (entry.new_values as Record<string, unknown>) : null;
+    const oldV =
+      typeof entry.old_values === "object" && entry.old_values
+        ? (entry.old_values as Record<string, unknown>)
+        : null;
+    const newV =
+      typeof entry.new_values === "object" && entry.new_values
+        ? (entry.new_values as Record<string, unknown>)
+        : null;
 
     if (entry.action === "CREATE" && newV) {
       return (
         <div className="space-y-1">
-          <p className="text-xs font-semibold text-green-700 mb-2">New Record Values:</p>
+          <p className="text-xs font-semibold text-green-700 mb-2">
+            New Record Values:
+          </p>
           {Object.entries(newV).map(([k, v]) => {
             if (k === "created_at" || k === "updated_at") return null;
-            const displayVal = typeof v === "object" ? JSON.stringify(v) : String(v ?? "(null)");
+            const displayVal =
+              typeof v === "object" ? JSON.stringify(v) : String(v ?? "(null)");
             return (
               <div key={k} className="text-xs">
                 <span className="font-medium text-gray-700">{k}:</span>{" "}
-                <span className="text-gray-600 break-all">{displayVal.length > 100 ? displayVal.slice(0, 100) + "…" : displayVal}</span>
+                <span className="text-gray-600 break-all">
+                  {displayVal.length > 100
+                    ? displayVal.slice(0, 100) + "…"
+                    : displayVal}
+                </span>
               </div>
             );
           })}
@@ -127,14 +160,21 @@ function AuditLogPage() {
     if (entry.action === "DELETE" && oldV) {
       return (
         <div className="space-y-1">
-          <p className="text-xs font-semibold text-red-700 mb-2">Deleted Record Values:</p>
+          <p className="text-xs font-semibold text-red-700 mb-2">
+            Deleted Record Values:
+          </p>
           {Object.entries(oldV).map(([k, v]) => {
             if (k === "created_at" || k === "updated_at") return null;
-            const displayVal = typeof v === "object" ? JSON.stringify(v) : String(v ?? "(null)");
+            const displayVal =
+              typeof v === "object" ? JSON.stringify(v) : String(v ?? "(null)");
             return (
               <div key={k} className="text-xs">
                 <span className="font-medium text-gray-700">{k}:</span>{" "}
-                <span className="text-gray-600 break-all">{displayVal.length > 100 ? displayVal.slice(0, 100) + "…" : displayVal}</span>
+                <span className="text-gray-600 break-all">
+                  {displayVal.length > 100
+                    ? displayVal.slice(0, 100) + "…"
+                    : displayVal}
+                </span>
               </div>
             );
           })}
@@ -143,7 +183,10 @@ function AuditLogPage() {
     }
 
     // UPDATE: show side-by-side diff
-    const allKeys = new Set([...Object.keys(oldV ?? {}), ...Object.keys(newV ?? {})]);
+    const allKeys = new Set([
+      ...Object.keys(oldV ?? {}),
+      ...Object.keys(newV ?? {}),
+    ]);
     const changedFields: { key: string; old: string; new: string }[] = [];
     for (const key of allKeys) {
       if (key === "updated_at" || key === "created_at") continue;
@@ -163,7 +206,8 @@ function AuditLogPage() {
     return (
       <div className="space-y-2">
         <p className="text-xs font-semibold text-blue-700 mb-2">
-          Changed {changedFields.length} field{changedFields.length > 1 ? "s" : ""}:
+          Changed {changedFields.length} field
+          {changedFields.length > 1 ? "s" : ""}:
         </p>
         {changedFields.map((f) => (
           <div key={f.key} className="rounded bg-gray-50 p-2 text-xs">
@@ -171,11 +215,15 @@ function AuditLogPage() {
             <div className="grid grid-cols-2 gap-2">
               <div>
                 <span className="text-red-600 font-medium">Old:</span>{" "}
-                <span className="text-gray-600 break-all">{f.old || "(empty)"}</span>
+                <span className="text-gray-600 break-all">
+                  {f.old || "(empty)"}
+                </span>
               </div>
               <div>
                 <span className="text-green-600 font-medium">New:</span>{" "}
-                <span className="text-gray-600 break-all">{f.new || "(empty)"}</span>
+                <span className="text-gray-600 break-all">
+                  {f.new || "(empty)"}
+                </span>
               </div>
             </div>
           </div>
@@ -198,10 +246,15 @@ function AuditLogPage() {
       <div className="rounded-lg bg-white p-4 shadow ring-1 ring-black/5 mb-6">
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-3 lg:grid-cols-6">
           <div>
-            <label className="block text-xs font-medium text-gray-500 mb-1">Table</label>
+            <label className="block text-xs font-medium text-gray-500 mb-1">
+              Table
+            </label>
             <select
               value={filterTable}
-              onChange={(e) => { setFilterTable(e.target.value); setPage(0); }}
+              onChange={(e) => {
+                setFilterTable(e.target.value);
+                setPage(0);
+              }}
               className="w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm"
             >
               <option value="">All Tables</option>
@@ -212,10 +265,15 @@ function AuditLogPage() {
             </select>
           </div>
           <div>
-            <label className="block text-xs font-medium text-gray-500 mb-1">Action</label>
+            <label className="block text-xs font-medium text-gray-500 mb-1">
+              Action
+            </label>
             <select
               value={filterAction}
-              onChange={(e) => { setFilterAction(e.target.value); setPage(0); }}
+              onChange={(e) => {
+                setFilterAction(e.target.value);
+                setPage(0);
+              }}
               className="w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm"
             >
               <option value="">All Actions</option>
@@ -225,30 +283,45 @@ function AuditLogPage() {
             </select>
           </div>
           <div>
-            <label className="block text-xs font-medium text-gray-500 mb-1">User</label>
+            <label className="block text-xs font-medium text-gray-500 mb-1">
+              User
+            </label>
             <input
               type="text"
               placeholder="Filter by user..."
               value={filterUser}
-              onChange={(e) => { setFilterUser(e.target.value); setPage(0); }}
+              onChange={(e) => {
+                setFilterUser(e.target.value);
+                setPage(0);
+              }}
               className="w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm"
             />
           </div>
           <div>
-            <label className="block text-xs font-medium text-gray-500 mb-1">From</label>
+            <label className="block text-xs font-medium text-gray-500 mb-1">
+              From
+            </label>
             <input
               type="date"
               value={filterStartDate}
-              onChange={(e) => { setFilterStartDate(e.target.value); setPage(0); }}
+              onChange={(e) => {
+                setFilterStartDate(e.target.value);
+                setPage(0);
+              }}
               className="w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm"
             />
           </div>
           <div>
-            <label className="block text-xs font-medium text-gray-500 mb-1">To</label>
+            <label className="block text-xs font-medium text-gray-500 mb-1">
+              To
+            </label>
             <input
               type="date"
               value={filterEndDate}
-              onChange={(e) => { setFilterEndDate(e.target.value); setPage(0); }}
+              onChange={(e) => {
+                setFilterEndDate(e.target.value);
+                setPage(0);
+              }}
               className="w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm"
             />
           </div>
@@ -275,9 +348,24 @@ function AuditLogPage() {
       <div className="rounded-lg bg-white shadow ring-1 ring-black/5 overflow-hidden">
         {loading ? (
           <div className="flex items-center gap-3 py-12 text-gray-500 justify-center">
-            <svg className="h-5 w-5 animate-spin" viewBox="0 0 24 24" fill="none">
-              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+            <svg
+              className="h-5 w-5 animate-spin"
+              viewBox="0 0 24 24"
+              fill="none"
+            >
+              <circle
+                className="opacity-25"
+                cx="12"
+                cy="12"
+                r="10"
+                stroke="currentColor"
+                strokeWidth="4"
+              />
+              <path
+                className="opacity-75"
+                fill="currentColor"
+                d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
+              />
             </svg>
             Loading audit log…
           </div>
@@ -291,18 +379,35 @@ function AuditLogPage() {
               <table className="min-w-full text-sm">
                 <thead>
                   <tr className="border-b border-gray-200 bg-gray-50">
-                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Timestamp</th>
-                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">User</th>
-                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Table</th>
-                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Record ID</th>
-                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Action</th>
-                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Changes</th>
-                    <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase">Detail</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">
+                      Timestamp
+                    </th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">
+                      User
+                    </th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">
+                      Table
+                    </th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">
+                      Record ID
+                    </th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">
+                      Action
+                    </th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">
+                      Changes
+                    </th>
+                    <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase">
+                      Detail
+                    </th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
                   {entries.map((entry) => (
-                    <tr key={entry.id} className="hover:bg-gray-50 transition-colors">
+                    <tr
+                      key={entry.id}
+                      className="hover:bg-gray-50 transition-colors"
+                    >
                       <td className="px-4 py-3 text-gray-600 whitespace-nowrap font-mono text-xs">
                         {new Date(entry.changed_at).toLocaleString()}
                       </td>
@@ -340,7 +445,8 @@ function AuditLogPage() {
             {totalPages > 1 && (
               <div className="flex items-center justify-between border-t border-gray-200 px-4 py-3 bg-gray-50">
                 <p className="text-xs text-gray-500">
-                  Showing {page * pageSize + 1}–{Math.min((page + 1) * pageSize, total)} of {total}
+                  Showing {page * pageSize + 1}–
+                  {Math.min((page + 1) * pageSize, total)} of {total}
                 </p>
                 <div className="flex items-center gap-2">
                   <button
@@ -356,7 +462,9 @@ function AuditLogPage() {
                   </span>
                   <button
                     type="button"
-                    onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
+                    onClick={() =>
+                      setPage((p) => Math.min(totalPages - 1, p + 1))
+                    }
                     disabled={page >= totalPages - 1}
                     className="rounded-md border border-gray-300 bg-white px-3 py-1 text-xs font-medium text-gray-600 hover:bg-gray-50 disabled:opacity-40"
                   >
@@ -375,16 +483,30 @@ function AuditLogPage() {
           <div className="w-full max-w-2xl rounded-xl bg-white p-6 shadow-xl max-h-[80vh] overflow-y-auto">
             <div className="flex items-start justify-between mb-4">
               <div>
-                <h2 className="text-lg font-bold text-gray-900">Audit Entry Detail</h2>
-                <p className="text-xs text-gray-500 mt-1">ID: {selectedEntry.id}</p>
+                <h2 className="text-lg font-bold text-gray-900">
+                  Audit Entry Detail
+                </h2>
+                <p className="text-xs text-gray-500 mt-1">
+                  ID: {selectedEntry.id}
+                </p>
               </div>
               <button
                 type="button"
                 onClick={() => setSelectedEntry(null)}
                 className="rounded-md p-1 text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors"
               >
-                <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                <svg
+                  className="h-5 w-5"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                  strokeWidth={2}
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    d="M6 18L18 6M6 6l12 12"
+                  />
                 </svg>
               </button>
             </div>
@@ -392,19 +514,27 @@ function AuditLogPage() {
             <dl className="grid grid-cols-2 gap-3 mb-4 text-sm">
               <div>
                 <dt className="text-xs font-medium text-gray-500">Timestamp</dt>
-                <dd className="text-gray-900">{new Date(selectedEntry.changed_at).toLocaleString()}</dd>
+                <dd className="text-gray-900">
+                  {new Date(selectedEntry.changed_at).toLocaleString()}
+                </dd>
               </div>
               <div>
                 <dt className="text-xs font-medium text-gray-500">User</dt>
-                <dd className="text-gray-900">{selectedEntry.changed_by ?? "—"}</dd>
+                <dd className="text-gray-900">
+                  {selectedEntry.changed_by ?? "—"}
+                </dd>
               </div>
               <div>
                 <dt className="text-xs font-medium text-gray-500">Table</dt>
-                <dd className="text-gray-900 font-mono">{selectedEntry.table_name}</dd>
+                <dd className="text-gray-900 font-mono">
+                  {selectedEntry.table_name}
+                </dd>
               </div>
               <div>
                 <dt className="text-xs font-medium text-gray-500">Record ID</dt>
-                <dd className="text-gray-900 font-mono text-xs">{selectedEntry.record_id}</dd>
+                <dd className="text-gray-900 font-mono text-xs">
+                  {selectedEntry.record_id}
+                </dd>
               </div>
               <div>
                 <dt className="text-xs font-medium text-gray-500">Action</dt>
@@ -413,12 +543,29 @@ function AuditLogPage() {
             </dl>
 
             <div className="border-t border-gray-200 pt-4">
-              <h3 className="text-sm font-semibold text-gray-900 mb-3">Changes</h3>
+              <h3 className="text-sm font-semibold text-gray-900 mb-3">
+                Changes
+              </h3>
               {detailLoading ? (
                 <div className="flex items-center gap-2 text-sm text-gray-500 py-4">
-                  <svg className="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                  <svg
+                    className="h-4 w-4 animate-spin"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                  >
+                    <circle
+                      className="opacity-25"
+                      cx="12"
+                      cy="12"
+                      r="10"
+                      stroke="currentColor"
+                      strokeWidth="4"
+                    />
+                    <path
+                      className="opacity-75"
+                      fill="currentColor"
+                      d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
+                    />
                   </svg>
                   Loading…
                 </div>

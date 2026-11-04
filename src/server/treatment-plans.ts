@@ -12,6 +12,7 @@ import {
   getClient,
   listAssessments,
   getAssessment,
+  getSignatures,
 } from "~/db";
 import type {
   TreatmentPlan,
@@ -26,9 +27,7 @@ import type {
 export const listTreatmentPlansFn = createServerFn({ method: "GET" })
   .validator(
     (d: unknown) =>
-      d as
-        | { search?: string; status?: string; clientId?: string }
-        | undefined,
+      d as { search?: string; status?: string; clientId?: string } | undefined,
   )
   .handler(async ({ data }) => {
     const opts: {
@@ -106,9 +105,7 @@ export const updateTreatmentPlanFn = createServerFn({ method: "POST" })
     (d: unknown) =>
       d as {
         id: string;
-        data: Partial<
-          Omit<TreatmentPlan, "id" | "created_at" | "updated_at">
-        >;
+        data: Partial<Omit<TreatmentPlan, "id" | "created_at" | "updated_at">>;
       },
   )
   .handler(async ({ data }) => {
@@ -141,19 +138,23 @@ export const getClientWithCompletedAssessmentsFn = createServerFn({
   });
 
 // ---------------------------------------------------------------------------
-// Get full context for a plan (client + linked assessment if any)
+// Get full context for a plan (client + linked assessment + signatures)
 // ---------------------------------------------------------------------------
 export const getTreatmentPlanContextFn = createServerFn({ method: "GET" })
   .validator((d: unknown) => d as { planId: string })
   .handler(async ({ data }) => {
     const plan = await getTreatmentPlan(data.planId);
-    if (!plan) return { plan: null, client: null, assessment: null };
+    if (!plan) {
+      return { plan: null, client: null, assessment: null, signatures: [] };
+    }
 
     const client = await getClient(plan.client_id);
     let assessment: Assessment | null = null;
     if (plan.assessment_id) {
       assessment = await getAssessment(plan.assessment_id);
     }
+    // Loaded here so a signed plan renders as signed on first paint.
+    const signatures = await getSignatures("treatment_plan", plan.id);
 
-    return { plan, client, assessment };
+    return { plan, client, assessment, signatures };
   });

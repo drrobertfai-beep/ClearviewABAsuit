@@ -11,7 +11,7 @@ export const Route = createFileRoute("/treatment-plans/new")({
   component: NewTreatmentPlanPage,
   loader: async () => {
     try {
-      return await listClientsFn({ status: "active" });
+      return await listClientsFn({ data: { status: "active" } });
     } catch {
       return [];
     }
@@ -36,7 +36,7 @@ function NewTreatmentPlanPage() {
 
   useEffect(() => {
     if (initialClients.length === 0) {
-      listClientsFn({ status: "active" })
+      listClientsFn({ data: { status: "active" } })
         .then(setClients)
         .catch(() => {});
     }
@@ -64,8 +64,10 @@ function NewTreatmentPlanPage() {
     if (!selectedClientId) return;
     try {
       const all = await listAssessmentsFn({
-        clientId: selectedClientId,
-        status: "completed",
+        data: {
+          clientId: selectedClientId,
+          status: "completed",
+        },
       });
       setAssessments(all);
       setStep("assessment");
@@ -81,8 +83,10 @@ function NewTreatmentPlanPage() {
     setCreating(true);
     try {
       const plan = await createTreatmentPlanFn({
-        clientId: selectedClientId,
-        assessmentId: selectedAssessmentId || undefined,
+        data: {
+          clientId: selectedClientId,
+          assessmentId: selectedAssessmentId || undefined,
+        },
       });
       navigate({ to: "/treatment-plans/$id/edit", params: { id: plan.id } });
     } catch (err) {

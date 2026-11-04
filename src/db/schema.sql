@@ -153,6 +153,25 @@ CREATE INDEX IF NOT EXISTS idx_audit_log_changed_at ON audit_log (changed_at);
 CREATE INDEX IF NOT EXISTS idx_audit_log_action ON audit_log (action);
 
 -- ============================================================================
+-- DEMO DATA MARKER
+-- ============================================================================
+-- Rows created by `bun src/db/seed-demo.ts` are flagged is_demo = TRUE so the
+-- demo practice can be identified and deleted again (`bun src/db/seed-demo.ts
+-- --remove`) without touching real records. Existing databases get the column
+-- through these ALTERs (CREATE TABLE IF NOT EXISTS above is a no-op there).
+ALTER TABLE clients ADD COLUMN IF NOT EXISTS is_demo BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE assessments ADD COLUMN IF NOT EXISTS is_demo BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE treatment_plans ADD COLUMN IF NOT EXISTS is_demo BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE signatures ADD COLUMN IF NOT EXISTS is_demo BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE audit_log ADD COLUMN IF NOT EXISTS is_demo BOOLEAN NOT NULL DEFAULT FALSE;
+
+CREATE INDEX IF NOT EXISTS idx_clients_is_demo ON clients (is_demo) WHERE is_demo;
+CREATE INDEX IF NOT EXISTS idx_assessments_is_demo ON assessments (is_demo) WHERE is_demo;
+CREATE INDEX IF NOT EXISTS idx_treatment_plans_is_demo ON treatment_plans (is_demo) WHERE is_demo;
+CREATE INDEX IF NOT EXISTS idx_signatures_is_demo ON signatures (is_demo) WHERE is_demo;
+CREATE INDEX IF NOT EXISTS idx_audit_log_is_demo ON audit_log (is_demo) WHERE is_demo;
+
+-- ============================================================================
 -- Row-Level Security (RLS) — foundation for HIPAA compliance
 -- ============================================================================
 -- Enable RLS on all tables; policies can be refined as auth matures.
