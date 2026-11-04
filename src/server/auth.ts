@@ -3,7 +3,13 @@
 // Uses httpOnly cookies for session tokens.
 
 import { createServerFn } from "@tanstack/react-start";
-import { getCookie, setCookie, deleteCookie } from "@tanstack/react-start/server";
+import {
+  getCookie,
+  setCookie,
+  deleteCookie,
+  getRequestHost,
+  getRequestProtocol,
+} from "@tanstack/react-start/server";
 import {
   getUserByEmail,
   createUser,
@@ -12,6 +18,7 @@ import {
   deleteSession,
 } from "~/db/auth";
 import { hashPassword, verifyPassword } from "~/server/password";
+import { shouldUseSecureCookie } from "~/server/session-cookie";
 import type { User } from "~/db/types";
 
 // ============================================================================
@@ -46,6 +53,49 @@ function toSafeUser(user: User): SafeUser {
 // ============================================================================
 const SESSION_COOKIE = "cv_auth_token";
 const SESSION_MAX_AGE = 60 * 60 * 24 * 7; // 7 days in seconds
+
+/**
+ * Whether the session cookie must carry the `Secure` flag for *this* request.
+ *
+ * The policy itself lives in `~/server/session-cookie` (pure + unit-testable);
+ * here we only read the live request. `x-forwarded-proto` / `x-forwarded-host`
+ * are honoured because production sits behind Vercel's TLS-terminating edge.
+ */
+function isSecureRequest(): boolean {
+  let protocol = "http";
+  let host = "";
+  try {
+    protocol = getRequestProtocol({ xForwardedProto: true });
+    host = getRequestHost({ xForwardedHost: true });
+  } catch {
+    // No request context (e.g. invoked outside a server-fn handler): the policy
+    // below then falls back to NODE_ENV.
+  }
+
+  return shouldUseSecureCookie({
+    protocol,
+    host,
+    nodeEnv: process.env.NODE_ENV,
+  });
+}
+
+/**
+ * Cookie attributes for the session token:
+ *  - `httpOnly` keeps the token out of reach of JavaScript (XSS),
+ *  - `sameSite: 'lax'` stops cross-site POSTs from carrying it (CSRF) while
+ *    still allowing normal top-level navigation,
+ *  - `secure` keeps it off plain-HTTP connections in production.
+ */
+
+function sessionCookieOptions() {
+  return {
+    httpOnly: true,
+    secure: isSecureRequest(),
+    sameSite: "lax" as const,
+    path: "/",
+    maxAge: SESSION_MAX_AGE,
+  };
+}
 
 // ============================================================================
 // getSessionFn — returns current user or null
@@ -87,14 +137,8 @@ export const loginFn = createServerFn({ method: "POST" })
     const expiresAt = new Date(Date.now() + SESSION_MAX_AGE * 1000);
     await createSession(user.id, token, expiresAt);
 
-    // Set httpOnly cookie
-    setCookie(SESSION_COOKIE, token, {
-      httpOnly: true,
-      secure: false, // Set to true in production with HTTPS
-      sameSite: "lax",
-      path: "/",
-      maxAge: SESSION_MAX_AGE,
-    });
+    // Set the session cookie (httpOnly, SameSite=Lax, Secure on HTTPS/prod)
+    setCookie(SESSION_COOKIE, token, sessionCookieOptions());
 
     return toSafeUser(user);
   });
@@ -151,14 +195,8 @@ export const registerFn = createServerFn({ method: "POST" })
     const expiresAt = new Date(Date.now() + SESSION_MAX_AGE * 1000);
     await createSession(user.id, token, expiresAt);
 
-    // Set httpOnly cookie
-    setCookie(SESSION_COOKIE, token, {
-      httpOnly: true,
-      secure: false,
-      sameSite: "lax",
-      path: "/",
-      maxAge: SESSION_MAX_AGE,
-    });
+    // Set the session cookie (httpOnly, SameSite=Lax, Secure on HTTPS/prod)
+    setCookie(SESSION_COOKIE, token, sessionCookieOptions());
 
     // Re-fetch user to get updated plan info
     const { getUserById } = await import("~/db/auth");
@@ -174,6 +212,12 @@ export const logoutFn = createServerFn({ method: "POST" }).handler(async () => {
   if (token) {
     await deleteSession(token);
   }
-  deleteCookie(SESSION_COOKIE, { path: "/" });
+  // Match the attributes used when setting it so the browser clears it too.
+  deleteCookie(SESSION_COOKIE, {
+    path: "/",
+    httpOnly: true,
+    secure: isSecureRequest(),
+    sameSite: "lax",
+  });
   return { success: true };
 });
