@@ -1,6 +1,7 @@
 import { createFileRoute, Link, useRouter } from "@tanstack/react-router";
 import { useState } from "react";
 import { registerFn } from "~/server/auth";
+import { PLANS } from "~/lib/plans";
 
 export const Route = createFileRoute("/register")({
   component: RegisterPage,
@@ -12,60 +13,6 @@ const ROLE_OPTIONS = [
   { value: "admin", label: "Admin — Practice Administrator" },
 ] as const;
 
-const PLANS = [
-  {
-    id: "solo",
-    name: "Solo",
-    price: "$49",
-    period: "/mo",
-    clientLimit: "Up to 10 clients",
-    seats: "1 practitioner seat",
-    features: [
-      "Unlimited assessments",
-      "Treatment plan generator",
-      "PDF export",
-      "Digital signatures",
-      "Email support",
-    ],
-    color: "border-indigo-200 hover:border-indigo-400",
-    selectedColor: "border-indigo-500 ring-2 ring-indigo-500",
-  },
-  {
-    id: "practice",
-    name: "Practice",
-    price: "$149",
-    period: "/mo",
-    clientLimit: "Up to 30 clients",
-    seats: "Up to 5 practitioner seats",
-    features: [
-      "Everything in Solo",
-      "Multi-user collaboration",
-      "Advanced reporting",
-      "Priority support",
-      "Team audit trail",
-    ],
-    color: "border-purple-200 hover:border-purple-400",
-    selectedColor: "border-purple-500 ring-2 ring-purple-500",
-    popular: true,
-  },
-  {
-    id: "clinic",
-    name: "Clinic",
-    price: "$299",
-    period: "/mo",
-    clientLimit: "Unlimited clients",
-    seats: "Unlimited practitioner seats",
-    features: [
-      "Everything in Practice",
-      "Custom branding",
-      "API access",
-      "Dedicated account manager",
-      "SLA guarantee",
-    ],
-    color: "border-emerald-200 hover:border-emerald-400",
-    selectedColor: "border-emerald-500 ring-2 ring-emerald-500",
-  },
-] as const;
 
 function RegisterPage() {
   const router = useRouter();
@@ -272,8 +219,8 @@ function RegisterPage() {
                   onClick={() => setSelectedPlan(plan.id)}
                   className={`relative flex flex-col rounded-lg border-2 bg-white p-5 text-left transition-all ${
                     selectedPlan === plan.id
-                      ? plan.selectedColor
-                      : plan.color
+                      ? plan.picker.selected
+                      : plan.picker.idle
                   }`}
                 >
                   {plan.popular && (
