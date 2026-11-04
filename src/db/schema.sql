@@ -26,8 +26,8 @@ CREATE TABLE IF NOT EXISTS clients (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-CREATE INDEX idx_clients_status ON clients (status);
-CREATE INDEX idx_clients_name ON clients (name);
+CREATE INDEX IF NOT EXISTS idx_clients_status ON clients (status);
+CREATE INDEX IF NOT EXISTS idx_clients_name ON clients (name);
 
 -- ============================================================================
 -- USERS (minimal — role-based access)
@@ -45,8 +45,25 @@ CREATE TABLE IF NOT EXISTS users (
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-CREATE INDEX idx_users_email ON users (email);
-CREATE INDEX idx_users_role ON users (role);
+CREATE INDEX IF NOT EXISTS idx_users_email ON users (email);
+CREATE INDEX IF NOT EXISTS idx_users_role ON users (role);
+
+-- ----------------------------------------------------------------------------
+-- Billing columns on users (idempotent, re-runnable)
+-- ----------------------------------------------------------------------------
+-- `CREATE TABLE IF NOT EXISTS users` above is a no-op on a database where the
+-- table already exists, so the billing columns are re-asserted here. This is
+-- what makes the plan/checkout work deployable to an existing database.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS plan TEXT NOT NULL DEFAULT 'trial';
+ALTER TABLE users ADD COLUMN IF NOT EXISTS trial_ends_at TIMESTAMPTZ DEFAULT (now() + INTERVAL '14 days');
+ALTER TABLE users ADD COLUMN IF NOT EXISTS stripe_customer_id TEXT;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS account_status TEXT NOT NULL DEFAULT 'trial';
+
+-- If `plan` predates this migration it may be nullable; backfill and tighten so
+-- every account always has a plan tier (the billing page reads this column).
+UPDATE users SET plan = 'trial' WHERE plan IS NULL;
+ALTER TABLE users ALTER COLUMN plan SET DEFAULT 'trial';
+ALTER TABLE users ALTER COLUMN plan SET NOT NULL;
 
 -- ============================================================================
 -- ASSESSMENTS
@@ -65,10 +82,10 @@ CREATE TABLE IF NOT EXISTS assessments (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-CREATE INDEX idx_assessments_client_id ON assessments (client_id);
-CREATE INDEX idx_assessments_status ON assessments (status);
-CREATE INDEX idx_assessments_tool_name ON assessments (tool_name);
-CREATE INDEX idx_assessments_date ON assessments (assessment_date);
+CREATE INDEX IF NOT EXISTS idx_assessments_client_id ON assessments (client_id);
+CREATE INDEX IF NOT EXISTS idx_assessments_status ON assessments (status);
+CREATE INDEX IF NOT EXISTS idx_assessments_tool_name ON assessments (tool_name);
+CREATE INDEX IF NOT EXISTS idx_assessments_date ON assessments (assessment_date);
 
 -- ============================================================================
 -- TREATMENT PLANS
@@ -97,9 +114,9 @@ CREATE TABLE IF NOT EXISTS treatment_plans (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-CREATE INDEX idx_treatment_plans_client_id ON treatment_plans (client_id);
-CREATE INDEX idx_treatment_plans_status ON treatment_plans (status);
-CREATE INDEX idx_treatment_plans_assessment_id ON treatment_plans (assessment_id);
+CREATE INDEX IF NOT EXISTS idx_treatment_plans_client_id ON treatment_plans (client_id);
+CREATE INDEX IF NOT EXISTS idx_treatment_plans_status ON treatment_plans (status);
+CREATE INDEX IF NOT EXISTS idx_treatment_plans_assessment_id ON treatment_plans (assessment_id);
 
 -- ============================================================================
 -- SIGNATURES
@@ -115,7 +132,7 @@ CREATE TABLE IF NOT EXISTS signatures (
     ip_address TEXT
 );
 
-CREATE INDEX idx_signatures_document ON signatures (document_type, document_id);
+CREATE INDEX IF NOT EXISTS idx_signatures_document ON signatures (document_type, document_id);
 
 -- ============================================================================
 -- AUDIT LOG
@@ -131,9 +148,9 @@ CREATE TABLE IF NOT EXISTS audit_log (
     new_values JSONB
 );
 
-CREATE INDEX idx_audit_log_table_record ON audit_log (table_name, record_id);
-CREATE INDEX idx_audit_log_changed_at ON audit_log (changed_at);
-CREATE INDEX idx_audit_log_action ON audit_log (action);
+CREATE INDEX IF NOT EXISTS idx_audit_log_table_record ON audit_log (table_name, record_id);
+CREATE INDEX IF NOT EXISTS idx_audit_log_changed_at ON audit_log (changed_at);
+CREATE INDEX IF NOT EXISTS idx_audit_log_action ON audit_log (action);
 
 -- ============================================================================
 -- Row-Level Security (RLS) — foundation for HIPAA compliance
@@ -148,11 +165,17 @@ ALTER TABLE users ENABLE ROW LEVEL SECURITY;
 
 -- For now, allow authenticated users full access (tighten as auth system matures).
 -- This keeps the MVP functional while maintaining the RLS scaffolding.
+DROP POLICY IF EXISTS clients_all_access ON clients;
 CREATE POLICY clients_all_access ON clients FOR ALL USING (true);
+DROP POLICY IF EXISTS assessments_all_access ON assessments;
 CREATE POLICY assessments_all_access ON assessments FOR ALL USING (true);
+DROP POLICY IF EXISTS treatment_plans_all_access ON treatment_plans;
 CREATE POLICY treatment_plans_all_access ON treatment_plans FOR ALL USING (true);
+DROP POLICY IF EXISTS signatures_all_access ON signatures;
 CREATE POLICY signatures_all_access ON signatures FOR ALL USING (true);
+DROP POLICY IF EXISTS audit_log_all_access ON audit_log;
 CREATE POLICY audit_log_all_access ON audit_log FOR ALL USING (true);
+DROP POLICY IF EXISTS users_all_access ON users;
 CREATE POLICY users_all_access ON users FOR ALL USING (true);
 
 -- ============================================================================
@@ -166,9 +189,10 @@ CREATE TABLE IF NOT EXISTS sessions (
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-CREATE INDEX idx_sessions_token ON sessions (token);
-CREATE INDEX idx_sessions_user_id ON sessions (user_id);
-CREATE INDEX idx_sessions_expires_at ON sessions (expires_at);
+CREATE INDEX IF NOT EXISTS idx_sessions_token ON sessions (token);
+CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions (user_id);
+CREATE INDEX IF NOT EXISTS idx_sessions_expires_at ON sessions (expires_at);
 
 ALTER TABLE sessions ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS sessions_all_access ON sessions;
 CREATE POLICY sessions_all_access ON sessions FOR ALL USING (true);
