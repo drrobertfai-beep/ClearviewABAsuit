@@ -130,6 +130,20 @@ function asArray(value: unknown): unknown[] {
   if (rec) {
     if (Array.isArray(rec.entries)) return rec.entries;
     if (Array.isArray(rec.services)) return rec.services;
+    // A day-keyed object ({ monday: [{ time, type, location }], ... }) was
+    // written by the earliest seed script. Flatten it, stamping the day.
+    const days = ["monday","tuesday","wednesday","thursday","friday","saturday","sunday"];
+    const flat: unknown[] = [];
+    for (const day of days) {
+      const rows = rec[day];
+      if (Array.isArray(rows)) {
+        for (const row of rows) {
+          const r = asRecord(row);
+          flat.push(r ? { day: day.charAt(0).toUpperCase() + day.slice(1), ...r } : row);
+        }
+      }
+    }
+    if (flat.length > 0) return flat;
   }
   return [];
 }
