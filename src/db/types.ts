@@ -109,6 +109,17 @@ export interface TreatmentPlan {
   authorization_end_date: string | null;
   /** Payer-assigned authorization / reference number. */
   authorization_number: string | null;
+  /**
+   * Free-text rationale that sits above the titration table: why the hours
+   * step down, and on what clinical evidence.
+   */
+  titration_rationale: string | null;
+  /**
+   * Phased step-down of authorized hours. Always read through
+   * `normalizeTitrationPhases()` — the column default is `[]`, and plans
+   * written before titration existed hold nothing at all.
+   */
+  titration_phases: unknown;
   status: TreatmentPlanStatus;
   /** TRUE for rows created by the demo seed script. */
   is_demo?: boolean;

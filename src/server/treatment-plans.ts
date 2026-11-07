@@ -26,6 +26,7 @@ import { requireSession } from "~/server/auth-guard";
 import {
   normalizeSchedule,
   normalizeServiceLines,
+  normalizeTitrationPhases,
 } from "~/lib/treatment-plan-authz";
 
 /**
@@ -43,6 +44,11 @@ function normalizeAuthorizationFields(
   }
   if ("therapy_schedule" in next) {
     next.therapy_schedule = normalizeSchedule(next.therapy_schedule);
+  }
+  if ("titration_phases" in next) {
+    // Store exactly the shape the reader expects, so a hand-built payload can
+    // never write a phase the editor and PDF cannot render.
+    next.titration_phases = normalizeTitrationPhases(next.titration_phases);
   }
   for (const key of ["authorization_start_date", "authorization_end_date"] as const) {
     if (key in next) {
@@ -130,6 +136,8 @@ export const createTreatmentPlanFn = createServerFn({ method: "POST" })
         authorization_start_date: null,
         authorization_end_date: null,
         authorization_number: null,
+        titration_rationale: null,
+        titration_phases: [],
         status: "draft",
       },
       user.email,

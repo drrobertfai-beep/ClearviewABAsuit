@@ -1,7 +1,7 @@
 // Treatment Plan Editor — /treatment-plans/$id/edit
 // Multi-tab form that auto-populates from client + assessment data.
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   getTreatmentPlanContextFn,
   updateTreatmentPlanFn,
@@ -16,14 +16,22 @@ import {
   WEEK_DAYS,
   authorizationWeeks,
   cptLabel,
+  emptyTitrationPhase,
+  firstPhaseFromServices,
   formatDateOnly,
   formatDuration,
   formatHours,
   isKnownCpt,
   normalizeSchedule,
   normalizeServiceLines,
+  normalizeTitrationPhases,
+  phaseHours,
+  phaseHoursForCpt,
+  phaseWeekLabel,
+  phasesThatIncrease,
   scheduleDurationMinutes,
   scheduledHoursPerWeek,
+  titrationCptCodes,
   totalHoursPerWeek,
 } from "~/lib/treatment-plan-authz";
 import type {
@@ -31,6 +39,8 @@ import type {
   ScheduleEntry,
   ServiceLine,
   ServiceSetting,
+  TitrationLine,
+  TitrationPhase,
 } from "~/lib/treatment-plan-authz";
 
 /** Display labels for the settings stored in the jsonb payload. */
@@ -99,6 +109,7 @@ type TabId =
   | "outcomes"
   | "parent"
   | "services"
+  | "titration"
   | "authorization"
   | "review";
 const TABS: { id: TabId; label: string }[] = [
@@ -109,6 +120,7 @@ const TABS: { id: TabId; label: string }[] = [
   { id: "outcomes", label: "Assessment Outcomes" },
   { id: "parent", label: "Parent & Coordination" },
   { id: "services", label: "Services & Schedule" },
+  { id: "titration", label: "Titration Plan" },
   { id: "authorization", label: "Authorization Request" },
   { id: "review", label: "Review & Submit" },
 ];
@@ -158,6 +170,8 @@ interface LocalForm {
   authorization_start_date: string;
   authorization_end_date: string;
   authorization_number: string;
+  titration_rationale: string;
+  titration_phases: TitrationPhase[];
   status: string;
 }
 
@@ -183,6 +197,8 @@ function emptyForm(): LocalForm {
     authorization_start_date: "",
     authorization_end_date: "",
     authorization_number: "",
+    titration_rationale: "",
+    titration_phases: [],
     status: "draft",
   };
 }
@@ -227,6 +243,10 @@ function planToLocal(plan: TreatmentPlan): LocalForm {
     authorization_start_date: plan.authorization_start_date?.slice(0, 10) ?? "",
     authorization_end_date: plan.authorization_end_date?.slice(0, 10) ?? "",
     authorization_number: plan.authorization_number ?? "",
+    // Plans written before the titration plan existed hold NULL / '[]' here and
+    // open with an empty phase list.
+    titration_rationale: plan.titration_rationale ?? "",
+    titration_phases: normalizeTitrationPhases(plan.titration_phases),
     status: plan.status,
   };
 }
@@ -330,6 +350,29 @@ function TreatmentPlanEditPage() {
     }
   }, [assessment, plan]);
 
+  // Phase 1 of a titration plan *is* the requested authorization, so open the
+  // BCBA on a phase built from the service lines rather than a blank table.
+  // Runs once per plan, and never over a titration that has been saved.
+  const titrationPrefilled = useRef<string | null>(null);
+  useEffect(() => {
+    if (!plan) return;
+    if (titrationPrefilled.current === plan.id) return;
+    // Wait for the form to be populated from the plan before deciding.
+    if (form.requested_services.length === 0 && form.titration_phases.length === 0) {
+      return;
+    }
+    titrationPrefilled.current = plan.id;
+    if (form.titration_phases.length > 0) return;
+    setForm((f) =>
+      f.titration_phases.length > 0
+        ? f
+        : {
+            ...f,
+            titration_phases: [firstPhaseFromServices(f.requested_services)],
+          },
+    );
+  }, [plan, form.requested_services.length, form.titration_phases.length]);
+
   const update = (patch: Partial<LocalForm>) => {
     setForm((prev) => ({ ...prev, ...patch }));
     setDirty(true);
@@ -368,6 +411,8 @@ function TreatmentPlanEditPage() {
             authorization_start_date: form.authorization_start_date || null,
             authorization_end_date: form.authorization_end_date || null,
             authorization_number: form.authorization_number || null,
+            titration_rationale: form.titration_rationale || null,
+            titration_phases: form.titration_phases,
             status: form.status as TreatmentPlan["status"],
           },
         },
@@ -1528,6 +1573,551 @@ function TreatmentPlanEditPage() {
     </div>
   );
 
+  // ---- Titration plan: phased step-down of the authorized hours ----
+  const titrationTotals = form.titration_phases.map(phaseHours);
+  const titrationCodes = titrationCptCodes(form.titration_phases);
+  const increasingPhaseIndexes = phasesThatIncrease(form.titration_phases);
+  const phase1Total = titrationTotals.length > 0 ? titrationTotals[0] : null;
+  const phase1Diverges =
+    phase1Total != null && Math.abs(phase1Total - totalRequestedHours) >= 0.1;
+
+  const setTitrationPhase = (index: number, patch: Partial<TitrationPhase>) => {
+    const next = [...form.titration_phases];
+    next[index] = { ...next[index], ...patch };
+    update({ titration_phases: next });
+  };
+
+  const addTitrationPhase = () => {
+    const existingCodes = titrationCptCodes(form.titration_phases);
+    const serviceCodes = form.requested_services
+      .map((line) => line.cpt_code.trim())
+      .filter((code) => code !== "");
+    const codes = existingCodes.length > 0 ? existingCodes : serviceCodes;
+    const phase = emptyTitrationPhase(
+      form.titration_phases.length,
+      [...new Set(codes)],
+    );
+    // Continue the week range where the previous phase stopped.
+    const previous = form.titration_phases[form.titration_phases.length - 1];
+    if (previous?.end_week != null) phase.start_week = previous.end_week + 1;
+    update({ titration_phases: [...form.titration_phases, phase] });
+  };
+
+  const removeTitrationPhase = (index: number) => {
+    update({
+      titration_phases: form.titration_phases.filter((_, i) => i !== index),
+    });
+  };
+
+  const moveTitrationPhase = (index: number, delta: number) => {
+    const target = index + delta;
+    if (target < 0 || target >= form.titration_phases.length) return;
+    const next = [...form.titration_phases];
+    const [moved] = next.splice(index, 1);
+    next.splice(target, 0, moved);
+    update({ titration_phases: next });
+  };
+
+  const setTitrationLine = (
+    phaseIndex: number,
+    lineIndex: number,
+    patch: Partial<TitrationLine>,
+  ) => {
+    update({
+      titration_phases: form.titration_phases.map((phase, i) =>
+        i !== phaseIndex
+          ? phase
+          : {
+              ...phase,
+              lines: phase.lines.map((line, j) =>
+                j === lineIndex ? { ...line, ...patch } : line,
+              ),
+            },
+      ),
+    });
+  };
+
+  const addTitrationLine = (phaseIndex: number) => {
+    update({
+      titration_phases: form.titration_phases.map((phase, i) =>
+        i !== phaseIndex
+          ? phase
+          : {
+              ...phase,
+              lines: [
+                ...phase.lines,
+                { cpt_code: "", hours_per_week: null },
+              ],
+            },
+      ),
+    });
+  };
+
+  const removeTitrationLine = (phaseIndex: number, lineIndex: number) => {
+    update({
+      titration_phases: form.titration_phases.map((phase, i) =>
+        i !== phaseIndex
+          ? phase
+          : { ...phase, lines: phase.lines.filter((_, j) => j !== lineIndex) },
+      ),
+    });
+  };
+
+  /** Phase 1 must equal the requested authorization — rebuild it from the lines. */
+  const prefillFirstPhase = () => {
+    if (form.requested_services.length === 0) return;
+    const phase = firstPhaseFromServices(form.requested_services);
+    const rest = form.titration_phases.slice(1);
+    update({ titration_phases: [phase, ...rest] });
+  };
+
+  const renderTitrationTab = () => (
+    <div className="space-y-6" data-testid="titration-tab">
+      <datalist id="titration-cpt-codes">
+        {CPT_CODES.map((c) => (
+          <option key={c.code} value={c.code}>
+            {c.label}
+          </option>
+        ))}
+      </datalist>
+
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-indigo-200 bg-indigo-50 px-5 py-4">
+        <div>
+          <p className="text-sm font-medium text-indigo-900">
+            Titration plan — phased step-down
+          </p>
+          <p className="text-xs text-indigo-700">
+            Phase 1 must equal the requested authorization; each later phase
+            lowers the hours as skills generalize. Every phase needs criteria in
+            both directions.
+          </p>
+        </div>
+        <div className="text-right">
+          <p className="text-xs font-medium uppercase tracking-wide text-indigo-700">
+            Requested hours / week
+          </p>
+          <p className="text-3xl font-bold text-indigo-700 tabular-nums">
+            {formatHours(totalRequestedHours)}
+          </p>
+        </div>
+      </div>
+
+      <Field label="Titration rationale">
+        <p className="text-xs text-gray-500 mb-2">
+          Why the hours step down, and what evidence will justify each
+          reduction. Reviewers reject a step-down table with no rationale behind
+          it.
+        </p>
+        <textarea
+          data-testid="titration-rationale"
+          value={form.titration_rationale}
+          onChange={(e) => update({ titration_rationale: e.target.value })}
+          rows={4}
+          className="input"
+          placeholder="Services begin at the requested intensity to establish instructional control and reduce dangerous behavior. Hours step down as the client acquires functional communication, the behavior plan moves to maintenance, and caregivers demonstrate independent implementation of the protocols."
+        />
+      </Field>
+
+      {form.titration_phases.length === 0 && (
+        <div className="rounded-md border border-dashed border-gray-300 bg-gray-50 px-4 py-6 text-center">
+          <p className="text-sm text-gray-600">
+            No titration phases yet. Phase 1 should equal the requested hours (
+            {formatHours(totalRequestedHours)}), then each later phase steps down
+            from there.
+          </p>
+          <button
+            type="button"
+            data-testid="titration-prefill"
+            onClick={prefillFirstPhase}
+            disabled={form.requested_services.length === 0}
+            className="mt-3 inline-flex items-center gap-2 rounded-md bg-white px-3 py-2 text-sm font-medium text-indigo-700 shadow-sm ring-1 ring-inset ring-indigo-300 hover:bg-indigo-50 disabled:opacity-50 transition-colors"
+          >
+            Start Phase 1 from the requested services
+          </button>
+          {form.requested_services.length === 0 && (
+            <p className="mt-2 text-xs text-gray-500">
+              Add the service lines on “Services &amp; Schedule” first.
+            </p>
+          )}
+        </div>
+      )}
+
+      {increasingPhaseIndexes.length > 0 && (
+        <div
+          data-testid="titration-increase-warning"
+          role="status"
+          className="rounded-md border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800"
+        >
+          <div className="flex items-start gap-2">
+            <svg
+              className="mt-0.5 h-4 w-4 shrink-0"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+              strokeWidth={2}
+              aria-hidden="true"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                d="M12 9v3.75m9-.75a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 3.75h.008v.008H12v-.008Z"
+              />
+            </svg>
+            <div>
+              <p className="font-semibold">
+                A titration steps down, not up
+              </p>
+              <p className="mt-0.5">
+                {increasingPhaseIndexes
+                  .map((i) => form.titration_phases[i].label || `Phase ${i + 1}`)
+                  .join(", ")}{" "}
+                {increasingPhaseIndexes.length === 1 ? "carries" : "carry"} more
+                hours per week than the phase before it. Lower the hours, or
+                explain the increase in the rationale above.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {phase1Diverges && (
+        <div
+          data-testid="titration-phase1-warning"
+          role="status"
+          className="rounded-md border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800"
+        >
+          Phase 1 covers {formatHours(phase1Total ?? 0)} but the request is{" "}
+          {formatHours(totalRequestedHours)}. The first phase has to match the
+          authorization exactly —{" "}
+          <button
+            type="button"
+            onClick={prefillFirstPhase}
+            className="font-semibold underline hover:no-underline"
+          >
+            rebuild Phase 1 from the requested services
+          </button>
+          .
+        </div>
+      )}
+
+      <div className="space-y-4">
+        {form.titration_phases.map((phase, i) => {
+          const total = phaseHours(phase);
+          const increases = increasingPhaseIndexes.includes(i);
+          return (
+            <div
+              key={i}
+              data-testid={`titration-phase-${i + 1}`}
+              className={`rounded-lg border p-4 ${
+                increases
+                  ? "border-amber-300 bg-amber-50/50"
+                  : "border-gray-200 bg-gray-50/60"
+              }`}
+            >
+              <div className="flex flex-wrap items-end gap-3">
+                <div className="min-w-[10rem] flex-1">
+                  <label className="block text-xs font-medium text-gray-600 mb-1">
+                    Phase label
+                  </label>
+                  <input
+                    value={phase.label}
+                    onChange={(e) =>
+                      setTitrationPhase(i, { label: e.target.value })
+                    }
+                    className="input"
+                    aria-label={`Label for phase ${i + 1}`}
+                  />
+                </div>
+                <div className="w-24">
+                  <label className="block text-xs font-medium text-gray-600 mb-1">
+                    Start week
+                  </label>
+                  <input
+                    type="number"
+                    min={1}
+                    value={phase.start_week ?? ""}
+                    onChange={(e) =>
+                      setTitrationPhase(i, {
+                        start_week:
+                          e.target.value === "" ? null : Number(e.target.value),
+                      })
+                    }
+                    className="input tabular-nums"
+                    aria-label={`Start week for phase ${i + 1}`}
+                  />
+                </div>
+                <div className="w-24">
+                  <label className="block text-xs font-medium text-gray-600 mb-1">
+                    End week
+                  </label>
+                  <input
+                    type="number"
+                    min={1}
+                    value={phase.end_week ?? ""}
+                    onChange={(e) =>
+                      setTitrationPhase(i, {
+                        end_week:
+                          e.target.value === "" ? null : Number(e.target.value),
+                      })
+                    }
+                    className="input tabular-nums"
+                    aria-label={`End week for phase ${i + 1}`}
+                  />
+                </div>
+                <div className="ml-auto flex items-center gap-2">
+                  <div className="text-right">
+                    <p className="text-xs uppercase tracking-wide text-gray-500">
+                      Total
+                    </p>
+                    <p className="text-lg font-bold text-gray-800 tabular-nums">
+                      {formatHours(total)}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => moveTitrationPhase(i, -1)}
+                    disabled={i === 0}
+                    aria-label={`Move ${phase.label || `phase ${i + 1}`} up`}
+                    className="rounded-md bg-white px-2 py-1 text-sm text-gray-600 shadow-sm ring-1 ring-inset ring-gray-300 hover:bg-gray-50 disabled:opacity-40 transition-colors"
+                  >
+                    &uarr;
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => moveTitrationPhase(i, 1)}
+                    disabled={i === form.titration_phases.length - 1}
+                    aria-label={`Move ${phase.label || `phase ${i + 1}`} down`}
+                    className="rounded-md bg-white px-2 py-1 text-sm text-gray-600 shadow-sm ring-1 ring-inset ring-gray-300 hover:bg-gray-50 disabled:opacity-40 transition-colors"
+                  >
+                    &darr;
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => removeTitrationPhase(i)}
+                    aria-label={`Remove ${phase.label || `phase ${i + 1}`}`}
+                    className="rounded-md bg-white px-2 py-1 text-sm text-gray-600 shadow-sm ring-1 ring-inset ring-gray-300 hover:bg-red-50 hover:text-red-700 transition-colors"
+                  >
+                    Remove
+                  </button>
+                </div>
+              </div>
+              <p className="mt-1 text-xs text-gray-500">{phaseWeekLabel(phase)}</p>
+
+              <table className="mt-3 min-w-full text-sm">
+                <thead>
+                  <tr className="border-b">
+                    <th className="py-1 pr-3 text-left text-xs font-semibold uppercase text-gray-500">
+                      CPT code
+                    </th>
+                    <th className="py-1 pr-3 text-left text-xs font-semibold uppercase text-gray-500">
+                      Hours / week
+                    </th>
+                    <th className="py-1" />
+                  </tr>
+                </thead>
+                <tbody>
+                  {phase.lines.map((line, j) => (
+                    <tr key={j} className="border-b last:border-0">
+                      <td className="py-1 pr-3">
+                        <input
+                          list="titration-cpt-codes"
+                          value={line.cpt_code}
+                          onChange={(e) =>
+                            setTitrationLine(i, j, { cpt_code: e.target.value })
+                          }
+                          className="input"
+                          placeholder="97153"
+                          aria-label={`CPT code for ${phase.label || `phase ${i + 1}`} line ${j + 1}`}
+                        />
+                        {cptLabel(line.cpt_code) && (
+                          <p className="mt-0.5 text-xs text-gray-500">
+                            {cptLabel(line.cpt_code)}
+                          </p>
+                        )}
+                      </td>
+                      <td className="py-1 pr-3">
+                        <input
+                          type="number"
+                          min={0}
+                          step={0.25}
+                          value={line.hours_per_week ?? ""}
+                          onChange={(e) =>
+                            setTitrationLine(i, j, {
+                              hours_per_week:
+                                e.target.value === ""
+                                  ? null
+                                  : Number(e.target.value),
+                            })
+                          }
+                          className="input w-24 tabular-nums"
+                          aria-label={`Hours per week for ${phase.label || `phase ${i + 1}`} line ${j + 1}`}
+                        />
+                      </td>
+                      <td className="py-1 text-right">
+                        <button
+                          type="button"
+                          onClick={() => removeTitrationLine(i, j)}
+                          aria-label={`Remove line ${j + 1} from ${phase.label || `phase ${i + 1}`}`}
+                          className="text-xs text-gray-500 hover:text-red-600"
+                        >
+                          Remove
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                  {phase.lines.length === 0 && (
+                    <tr>
+                      <td colSpan={3} className="py-2 text-sm text-gray-400">
+                        No CPT lines in this phase yet.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+              <button
+                type="button"
+                onClick={() => addTitrationLine(i)}
+                className="mt-2 text-sm font-medium text-indigo-600 hover:text-indigo-500"
+              >
+                + Add CPT line
+              </button>
+
+              <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">
+                    Criteria to step down
+                  </label>
+                  <textarea
+                    value={phase.criteria_to_step_down}
+                    onChange={(e) =>
+                      setTitrationPhase(i, {
+                        criteria_to_step_down: e.target.value,
+                      })
+                    }
+                    rows={3}
+                    className="input"
+                    aria-label={`Criteria to step down for ${phase.label || `phase ${i + 1}`}`}
+                    placeholder="Reduce hours once the client independently mands for 80% of opportunities across 3 consecutive sessions, and tantrum duration averages under 2 minutes per day for 2 weeks."
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">
+                    Criteria to step back up
+                  </label>
+                  <textarea
+                    value={phase.criteria_to_step_up}
+                    onChange={(e) =>
+                      setTitrationPhase(i, { criteria_to_step_up: e.target.value })
+                    }
+                    rows={3}
+                    className="input"
+                    aria-label={`Criteria to step up for ${phase.label || `phase ${i + 1}`}`}
+                    placeholder="Return to the prior intensity if problem behavior exceeds baseline for 2 consecutive weeks, or if skill acquisition stalls across 3 consecutive probe sets."
+                  />
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="flex flex-wrap items-center gap-3">
+        <button
+          type="button"
+          data-testid="titration-add-phase"
+          onClick={addTitrationPhase}
+          className="inline-flex items-center gap-2 rounded-md bg-white px-3 py-2 text-sm font-medium text-gray-700 shadow-sm ring-1 ring-inset ring-gray-300 hover:bg-gray-50 transition-colors"
+        >
+          + Add Phase
+        </button>
+        {form.titration_phases.length > 0 && (
+          <button
+            type="button"
+            onClick={prefillFirstPhase}
+            disabled={form.requested_services.length === 0}
+            className="text-sm font-medium text-indigo-600 hover:text-indigo-500 disabled:opacity-50"
+          >
+            Reset Phase 1 to the requested hours
+          </button>
+        )}
+      </div>
+
+      {form.titration_phases.length > 0 && titrationCodes.length > 0 && (
+        <div className="rounded-lg border border-gray-200 bg-white p-4">
+          <h4 className="text-sm font-semibold text-gray-700">
+            Step-down by CPT code
+          </h4>
+          <p className="mb-2 text-xs text-gray-500">
+            The curve at a glance — technician hours (97153) and supervision
+            (97155) can step down on different schedules.{" "}
+            <span
+              data-testid="titration-curve"
+              className="font-medium text-gray-700 tabular-nums"
+            >
+              {titrationTotals.join(" → ")} hrs/wk
+            </span>
+          </p>
+          <div className="overflow-x-auto">
+            <table className="min-w-full text-sm">
+              <thead>
+                <tr className="border-b">
+                  <th className="py-1 pr-3 text-left text-xs font-semibold uppercase text-gray-500">
+                    CPT
+                  </th>
+                  {form.titration_phases.map((phase, i) => (
+                    <th
+                      key={i}
+                      className="px-2 py-1 text-right text-xs font-semibold uppercase text-gray-500"
+                    >
+                      {phase.label || `Phase ${i + 1}`}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {titrationCodes.map((code) => (
+                  <tr key={code} className="border-b last:border-0">
+                    <td className="py-1 pr-3 font-medium text-gray-800">
+                      {code}
+                      {cptLabel(code) && (
+                        <span className="block text-xs font-normal text-gray-400">
+                          {cptLabel(code)}
+                        </span>
+                      )}
+                    </td>
+                    {form.titration_phases.map((phase, i) => (
+                      <td
+                        key={i}
+                        className="px-2 py-1 text-right tabular-nums text-gray-700"
+                      >
+                        {phaseHoursForCpt(phase, code) ?? "—"}
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot>
+                <tr className="border-t">
+                  <td className="py-1 pr-3 text-xs font-semibold uppercase text-gray-500">
+                    Total hrs/wk
+                  </td>
+                  {titrationTotals.map((value, i) => (
+                    <td
+                      key={i}
+                      className="px-2 py-1 text-right font-semibold tabular-nums text-indigo-700"
+                    >
+                      {value}
+                    </td>
+                  ))}
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+
   // ---- Authorization request: period, totals, medical necessity ----
   const renderAuthorizationTab = () => (
     <div className="space-y-8">
@@ -1662,6 +2252,12 @@ function TreatmentPlanEditPage() {
           <p>
             <strong>Schedule:</strong> {form.therapy_schedule.length} blocks,{" "}
             {formatHours(totalScheduledHours)} scheduled
+          </p>
+          <p>
+            <strong>Titration:</strong>{" "}
+            {form.titration_phases.length === 0
+              ? "—"
+              : `${form.titration_phases.length} phase${form.titration_phases.length === 1 ? "" : "s"}, ${form.titration_phases.map(phaseHours).join(" → ")} hrs/wk`}
           </p>
           <p>
             <strong>Authorization period:</strong>{" "}
@@ -1854,6 +2450,7 @@ function TreatmentPlanEditPage() {
         {activeTab === "outcomes" && renderOutcomesTab()}
         {activeTab === "parent" && renderParentTab()}
         {activeTab === "services" && renderServicesTab()}
+        {activeTab === "titration" && renderTitrationTab()}
         {activeTab === "authorization" && renderAuthorizationTab()}
         {activeTab === "review" && renderReviewTab()}
       </div>

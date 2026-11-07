@@ -13,11 +13,15 @@ import {
 import { SignaturePad } from "~/components/SignaturePad";
 import { SignatureSection } from "~/components/SignatureSection";
 import {
+  cptLabel,
   formatDateOnly,
   formatDuration,
   formatHours,
   normalizeSchedule,
   normalizeServiceLines,
+  normalizeTitrationPhases,
+  phaseHours,
+  phaseWeekLabel,
   scheduleDurationMinutes,
   scheduledHoursPerWeek,
   sortSchedule,
@@ -809,6 +813,96 @@ function TreatmentPlanDetailPage() {
             )}
           </Section>
         )}
+
+        {/* Section 9: Titration Plan — the phased step-down of authorized
+            hours. Plans written before titration existed render the empty
+            state rather than a broken table. */}
+        <Section title="9. Titration Plan">
+          {(() => {
+            const phases = normalizeTitrationPhases(plan.titration_phases);
+            if (phases.length === 0) {
+              return (
+                <p className="text-sm text-gray-400" data-testid="titration-empty">
+                  No titration plan recorded.
+                </p>
+              );
+            }
+            return (
+              <div data-testid="titration-view">
+                <h4 className="text-xs font-semibold text-gray-500 uppercase mb-1">
+                  Titration rationale
+                </h4>
+                {plan.titration_rationale ? (
+                  <p className="text-sm text-gray-700 whitespace-pre-line leading-relaxed mb-4">
+                    {plan.titration_rationale}
+                  </p>
+                ) : (
+                  <p className="text-sm text-gray-400 mb-4">—</p>
+                )}
+                <div className="overflow-x-auto">
+                  <table className="min-w-full text-sm">
+                    <thead>
+                      <tr className="border-b">
+                        <th className="py-2 pr-3 text-left text-xs font-semibold text-gray-500 uppercase">
+                          Phase
+                        </th>
+                        <th className="py-2 pr-3 text-left text-xs font-semibold text-gray-500 uppercase">
+                          Weeks
+                        </th>
+                        <th className="py-2 pr-3 text-left text-xs font-semibold text-gray-500 uppercase">
+                          Hours / week by CPT
+                        </th>
+                        <th className="py-2 pr-3 text-left text-xs font-semibold text-gray-500 uppercase">
+                          Total
+                        </th>
+                        <th className="py-2 pr-3 text-left text-xs font-semibold text-gray-500 uppercase">
+                          Criteria to step down
+                        </th>
+                        <th className="py-2 text-left text-xs font-semibold text-gray-500 uppercase">
+                          Criteria to step back up
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {phases.map((phase, i) => (
+                        <tr key={i} className="border-b align-top last:border-0">
+                          <td className="py-2 pr-3 font-medium text-gray-800">
+                            {phase.label || `Phase ${i + 1}`}
+                          </td>
+                          <td className="py-2 pr-3 text-gray-600">
+                            {phaseWeekLabel(phase)}
+                          </td>
+                          <td className="py-2 pr-3 text-gray-600 tabular-nums">
+                            {phase.lines.length === 0
+                              ? "—"
+                              : phase.lines.map((line, j) => (
+                                  <span key={j} className="block">
+                                    {line.cpt_code || "—"}
+                                    {cptLabel(line.cpt_code)
+                                      ? ` (${cptLabel(line.cpt_code)})`
+                                      : ""}
+                                    : {line.hours_per_week ?? "—"}
+                                  </span>
+                                ))}
+                          </td>
+                          <td className="py-2 pr-3 font-semibold text-indigo-700 tabular-nums">
+                            {formatHours(phaseHours(phase))}
+                          </td>
+                          <td className="py-2 pr-3 text-gray-600 whitespace-pre-line">
+                            {phase.criteria_to_step_down || "—"}
+                          </td>
+                          <td className="py-2 text-gray-600 whitespace-pre-line">
+                            {phase.criteria_to_step_up || "—"}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            );
+          })()}
+        </Section>
 
         {/* Signatures — rendered from the loader so a signed plan shows as
             signed on first paint; the panel refreshes itself after signing. */}

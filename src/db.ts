@@ -557,6 +557,7 @@ export async function createTreatmentPlan(
       parent_training_goals, service_coordination_goals, discharge_criteria,
       requested_services, therapy_schedule, clinical_justification,
       authorization_start_date, authorization_end_date, authorization_number,
+      titration_rationale, titration_phases,
       status
     ) VALUES (
       ${data.client_id}, ${data.assessment_id ?? null},
@@ -577,6 +578,8 @@ export async function createTreatmentPlan(
       ${data.authorization_start_date || null}::date,
       ${data.authorization_end_date || null}::date,
       ${data.authorization_number ?? null},
+      ${data.titration_rationale ?? null},
+      ${JSON.stringify(data.titration_phases ?? [])}::jsonb,
       ${data.status ?? "draft"}
     )
     RETURNING *
@@ -622,7 +625,8 @@ export async function updateTreatmentPlan(
     "client_id", "assessment_id", "reason_for_referral", "diagnosis",
     "treatment_history", "family_history", "school_info",
     "behavior_intervention_plan", "assessment_outcomes", "discharge_criteria",
-    "clinical_justification", "authorization_number", "status",
+    "clinical_justification", "authorization_number", "titration_rationale",
+    "status",
   ];
   for (const f of scalarFields) {
     if (f in data) {
@@ -643,7 +647,7 @@ export async function updateTreatmentPlan(
   const jsonbFields = [
     "concurrent_services", "maladaptive_behaviors", "skill_acquisition_goals",
     "parent_training_goals", "service_coordination_goals", "requested_services",
-    "therapy_schedule",
+    "therapy_schedule", "titration_phases",
   ] as const;
   for (const f of jsonbFields) {
     if (f in data) {

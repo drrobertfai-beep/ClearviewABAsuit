@@ -438,6 +438,8 @@ async function seed() {
     authorization_start_date: "2026-12-01",
     authorization_end_date: "2027-05-31",
     authorization_number: "AUTH-2026-004417",
+    titration_rationale: null,
+    titration_phases: [],
     status: "draft",
   }, "seed-script");
   console.log(`\n✓ Treatment Plan: ${plan.id} (status: ${plan.status})`);

@@ -324,6 +324,18 @@ export async function applySchema(): Promise<MigrationResult> {
       await neonClient.query(stmt);
     }
 
+    // Columns added to treatment_plans after the original schema shipped. They
+    // are also in schema.sql; re-applying them here is belt-and-braces for a
+    // database migrated by an older copy of this script. Both are idempotent,
+    // so a second run is a no-op. `titration_phases` holds the phased step-down
+    // table submitted with the authorization request.
+    await neonClient.query(
+      `ALTER TABLE treatment_plans ADD COLUMN IF NOT EXISTS titration_rationale TEXT`,
+    );
+    await neonClient.query(
+      `ALTER TABLE treatment_plans ADD COLUMN IF NOT EXISTS titration_phases JSONB DEFAULT '[]'::jsonb`,
+    );
+
     // Data backfill runs after the schema statements and before NOT NULL.
     const backfill = await runTenancyBackfill();
 
