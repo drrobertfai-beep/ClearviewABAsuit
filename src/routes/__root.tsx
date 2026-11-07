@@ -5,6 +5,7 @@ import {
   createRootRoute,
   Link,
   useRouter,
+  useRouterState,
 } from "@tanstack/react-router";
 import { redirect } from "@tanstack/react-router";
 import type { ReactNode } from "react";
@@ -33,10 +34,12 @@ export const Route = createRootRoute({
   beforeLoad: async ({ location }) => {
     const user = await getSessionFn();
 
-    // Pages that are readable without a session. /billing is the public pricing
-    // page: a visitor comparing plans must be able to see the plans (and their
-    // Stripe checkout links) without signing up first.
-    const openPaths = ["/billing"];
+    // Pages that are readable without a session. "/" is the public marketing
+    // landing page (it renders the dashboard instead once a user is signed in).
+    // /billing is the public pricing page: a visitor comparing plans must be
+    // able to see the plans (and their Stripe checkout links) without signing
+    // up first.
+    const openPaths = ["/", "/billing"];
     // Pages that only make sense for signed-out visitors.
     const guestOnlyPaths = ["/login", "/register", "/offline"];
 
@@ -79,10 +82,16 @@ export const Route = createRootRoute({
 function RootComponent() {
   const ctx = Route.useRouteContext();
   const user = ctx.user as SafeUser | null;
+  // The landing page at "/" ships its own marketing header, so the app chrome
+  // is hidden for signed-out visitors there.
+  const pathname = useRouterState({
+    select: (state) => state.location.pathname.replace(/\/+$/, "") || "/",
+  });
+  const showAppChrome = user !== null || pathname !== "/";
 
   return (
     <RootDocument>
-      <NavBar user={user} />
+      {showAppChrome && <NavBar user={user} />}
       <main>
         <Outlet />
       </main>
@@ -218,7 +227,7 @@ function NavBar({ user }: { user: SafeUser | null }) {
   const [loggingOut, setLoggingOut] = useState(false);
 
   const linkClasses =
-    "inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition-colors";
+    "inline-flex items-center gap-1.5 whitespace-nowrap rounded-md px-3 py-1.5 text-sm font-medium transition-colors";
 
   async function handleLogout() {
     setLoggingOut(true);
@@ -246,7 +255,7 @@ function NavBar({ user }: { user: SafeUser | null }) {
         {/* App name / home link */}
         <Link
           to={user ? "/" : "/login"}
-          className="flex items-center gap-2 text-lg font-bold text-indigo-600 hover:text-indigo-700 transition-colors"
+          className="flex items-center gap-2 whitespace-nowrap text-lg font-bold text-indigo-600 hover:text-indigo-700 transition-colors"
         >
           <svg
             className="h-7 w-7"
