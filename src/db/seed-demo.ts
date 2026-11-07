@@ -811,6 +811,56 @@ const PLANS = [
       { day: "Friday", start_time: "09:00", end_time: "12:00", service: "97153", setting: "home", provider: "RBT" },
       { day: "Friday", start_time: "13:00", end_time: "13:30", service: "97156", setting: "telehealth", provider: "Parent/Caregiver Training" },
     ],
+    // Three-phase step-down across the 26-week authorization period:
+    // 23.5 → 18 → 12 hrs/wk. Phase 1 equals the requested services above.
+    // Direct technician hours carry most of the reduction; caregiver training
+    // (97156) is protected at 0.5 hrs/wk in every phase.
+    titration_rationale:
+      "DEMO DATA. Services begin at the authorized 23.5 hours per week to establish instructional control, build a functional communication repertoire, and reduce dangerous behavior to a level the family and school can manage. Hours step down in two planned reductions as the requesting repertoire generalizes and caregivers take over the protocol. Direct technician hours (97153) carry most of the reduction, while BCBA supervision (97155) steps down more slowly and caregiver training (97156) is protected at 0.5 hours per week in every phase, because caregiver implementation is what maintains gains after discharge. Each reduction is written with criteria in both directions, so intensity can be restored without a new authorization if the client regresses.",
+    titration_phases: [
+      {
+        label: "Phase 1 — Establish",
+        start_week: 1,
+        end_week: 10,
+        lines: [
+          { cpt_code: "97153", hours_per_week: 20 },
+          { cpt_code: "97155", hours_per_week: 3 },
+          { cpt_code: "97156", hours_per_week: 0.5 },
+        ],
+        criteria_to_step_down:
+          "Step down to Phase 2 once the client independently mands for 10 or more different items across 3 consecutive sessions, session problem behavior averages at or below 2 instances per day for 2 consecutive weeks, and caregivers implement the functional communication protocol with at least 80% fidelity on the written checklist.",
+        criteria_to_step_up:
+          "Return to full Phase 1 intensity if problem behavior exceeds the baseline rate of 5 instances per day across 2 consecutive weeks, or if the mand repertoire fails to add a new item across 3 consecutive probe sets.",
+      },
+      {
+        label: "Phase 2 — Generalize",
+        start_week: 11,
+        end_week: 18,
+        lines: [
+          { cpt_code: "97153", hours_per_week: 15 },
+          { cpt_code: "97155", hours_per_week: 2.5 },
+          { cpt_code: "97156", hours_per_week: 0.5 },
+        ],
+        criteria_to_step_down:
+          "Step down to Phase 3 once requesting has generalized to 2 or more untrained settings and 3 or more communication partners, problem behavior averages at or below 1 instance per day for 3 consecutive weeks, and at least 80% of current skill acquisition targets meet mastery criteria.",
+        criteria_to_step_up:
+          "Return to Phase 2 intensity if problem behavior increases by 25% or more over the Phase 2 mean across 2 consecutive weeks, or if the client regresses on previously mastered requesting targets.",
+      },
+      {
+        label: "Phase 3 — Maintain",
+        start_week: 19,
+        end_week: 26,
+        lines: [
+          { cpt_code: "97153", hours_per_week: 10 },
+          { cpt_code: "97155", hours_per_week: 1.5 },
+          { cpt_code: "97156", hours_per_week: 0.5 },
+        ],
+        criteria_to_step_down:
+          "Transition to maintenance and discharge from active treatment once the client requests needs independently across home, school and community settings for 4 consecutive weeks, problem behavior occurs no more than once per week, and caregivers maintain 90% protocol fidelity without coaching.",
+        criteria_to_step_up:
+          "Return to Phase 2 intensity if problem behavior occurs more than once per week for 2 consecutive weeks, a new topography of dangerous behavior emerges, or caregiver fidelity drops below 70%.",
+      },
+    ],
   },
   {
     id: PLAN_IDS[1],
@@ -945,6 +995,9 @@ const PLANS = [
     ],
   },
   {
+    // Active plan: titration is filled in by the BCBA during the authorization period.
+    titration_rationale: null,
+    titration_phases: [],
     id: PLAN_IDS[2],
     client_id: CLIENT_IDS[3],
     assessment_id: ASSESSMENT_IDS[3],
@@ -1041,6 +1094,10 @@ const PLANS = [
       { day: "Thursday", start_time: "15:30", end_time: "17:30", service: "97153", setting: "home", provider: "RBT" },
       { day: "Friday", start_time: "15:30", end_time: "17:30", service: "97153", setting: "home", provider: "RBT" },
     ],
+    // Draft plan: no titration recorded yet, which is the backward-compatible
+    // case the plan view and PDF export have to render cleanly.
+    titration_rationale: null,
+    titration_phases: [],
   },
 ];
 
@@ -1390,11 +1447,12 @@ async function seed() {
          discharge_criteria, requested_services, therapy_schedule,
          clinical_justification, authorization_start_date,
          authorization_end_date, authorization_number, status,
+         titration_rationale, titration_phases,
          created_at, updated_at, is_demo
        ) VALUES (
          $1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9, $10::jsonb, $11, $12::jsonb,
          $13, $14::jsonb, $15::jsonb, $16, $17::jsonb, $18::jsonb,
-         $19, $20::date, $21::date, $22, $23, $24, $24, TRUE
+         $19, $20::date, $21::date, $22, $23, $25, $26::jsonb, $24, $24, TRUE
        )`,
       [
         p.id,
@@ -1421,6 +1479,8 @@ async function seed() {
         p.authorization_number || null,
         p.status,
         p.created,
+        p.titration_rationale ?? null,
+        JSON.stringify(p.titration_phases ?? []),
       ],
     );
     pushAudit({

@@ -20,6 +20,9 @@ import {
   formatDuration,
   normalizeSchedule,
   normalizeServiceLines,
+  normalizeTitrationPhases,
+  phaseHours,
+  phaseWeekLabel,
   scheduleDurationMinutes,
   scheduledHoursPerWeek,
   sortSchedule,
@@ -724,9 +727,111 @@ function buildTreatmentPlanPDF(
     y += 8;
   }
 
-  // --- Section 14: Authorization Period & Clinical Justification ---
+  // --- Section 14: Titration Plan ---
+  // Phased step-down of the authorized hours. Plans written before titration
+  // existed export the empty line instead of an error.
+  const titrationPhases = normalizeTitrationPhases(plan.titration_phases);
+  y = ensureSpace(doc, y, 45);
+  y = addSectionTitle(doc, "Section 14: Titration Plan", y + 2);
+  if (titrationPhases.length === 0) {
+    doc.setFontSize(9);
+    doc.setTextColor(107, 114, 128);
+    doc.text("No titration plan recorded.", 14, y);
+    y += 8;
+  } else {
+    if (plan.titration_rationale) {
+      doc.setFontSize(9);
+      doc.setTextColor(55, 65, 81);
+      const rationaleLines = doc.splitTextToSize(
+        plan.titration_rationale,
+        pageWidth - 28,
+      ) as string[];
+      let remaining = rationaleLines;
+      while (remaining.length > 0) {
+        const pageBottom = doc.internal.pageSize.height - 20;
+        const capacity = Math.floor((pageBottom - y) / 4.5);
+        if (capacity <= 0) {
+          doc.addPage();
+          y = 25;
+          continue;
+        }
+        const chunk = remaining.slice(0, capacity);
+        doc.text(chunk, 14, y);
+        y += chunk.length * 4.5;
+        remaining = remaining.slice(capacity);
+        if (remaining.length > 0) {
+          doc.addPage();
+          y = 25;
+        }
+      }
+      y += 4;
+    }
+
+    autoTable(doc, {
+      head: [["Phase", "Weeks", "Hours / week by CPT", "Total"]],
+      body: titrationPhases.map((phase) => [
+        phase.label || "—",
+        phaseWeekLabel(phase),
+        phase.lines.length === 0
+          ? "—"
+          : phase.lines
+              .map((line) => `${line.cpt_code || "—"}: ${line.hours_per_week ?? "—"}`)
+              .join("\n"),
+        `${phaseHours(phase)} hrs/wk`,
+      ]),
+      startY: y,
+      theme: "grid",
+      // Long CPT lists wrap inside the cell instead of overflowing the page.
+      styles: { fontSize: 8, cellPadding: 2, valign: "top", overflow: "linebreak" },
+      headStyles: { fillColor: [79, 70, 229], textColor: 255, fontStyle: "bold" },
+      columnStyles: {
+        0: { cellWidth: 36 },
+        1: { cellWidth: 26 },
+        2: { cellWidth: 72 },
+        3: { cellWidth: 26, fontStyle: "bold" },
+      },
+      // A phase row is never split across two pages.
+      rowPageBreak: "avoid",
+      margin: { left: 14, right: 14 },
+    });
+    y = (doc as unknown as { lastAutoTable?: { finalY: number } }).lastAutoTable?.finalY ?? y + 6;
+    y += 5;
+
+    // Criteria, one labelled block per phase, each line page-guarded so long
+    // BCBA prose wraps and paginates without overflowing.
+    const printBlock = (heading: string, text: string) => {
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(8.5);
+      doc.setTextColor(55, 65, 81);
+      y = ensureSpace(doc, y, 12);
+      doc.text(heading, 14, y);
+      y += 4.5;
+      doc.setFont("helvetica", "normal");
+      doc.setTextColor(75, 85, 99);
+      const lines = doc.splitTextToSize(text || "—", pageWidth - 28) as string[];
+      for (const line of lines) {
+        y = ensureSpace(doc, y, 5);
+        doc.text(line, 14, y);
+        y += 4.2;
+      }
+      y += 2.5;
+    };
+    for (const phase of titrationPhases) {
+      printBlock(
+        `${phase.label || "Phase"} (${phaseWeekLabel(phase)}) — criteria to step down:`,
+        phase.criteria_to_step_down,
+      );
+      printBlock(
+        `${phase.label || "Phase"} — criteria to step back up:`,
+        phase.criteria_to_step_up,
+      );
+    }
+    y += 2;
+  }
+
+  // --- Section 15: Authorization Period & Clinical Justification ---
   y = ensureSpace(doc, y, 60);
-  y = addSectionTitle(doc, "Section 14: Authorization Request & Medical Necessity", y + 2);
+  y = addSectionTitle(doc, "Section 15: Authorization Request & Medical Necessity", y + 2);
   doc.setFontSize(9);
   const authRows: [string, string][] = [
     ["Authorization Period", authorizationPeriodLabel(plan)],
