@@ -8,7 +8,12 @@
 //   - prices are read from ~/lib/plans (the single source of truth), never copied
 import { Link } from "@tanstack/react-router";
 
-import { PLANS } from "~/lib/plans";
+import {
+  PLANS,
+  clientLimitLabel,
+  planLimits,
+  seatsLabel,
+} from "~/lib/plans";
 
 const SCREENSHOT_CLIENTS = "/screenshots/clients-list.png";
 const SCREENSHOT_SIGNATURES = "/screenshots/treatment-plan-signatures.png";
@@ -361,8 +366,8 @@ export function LandingPage() {
                     {plan.period}
                   </span>
                 </p>
-                <p className="mt-3 text-sm text-gray-600">{plan.clientLimit}</p>
-                <p className="text-sm text-gray-600">{plan.seats}</p>
+                <p className="mt-3 text-sm text-gray-600">{clientLimitLabel(plan.clientLimit)}</p>
+                <p className="text-sm text-gray-600">{seatsLabel(plan.seats)}</p>
 
                 <ul className="mt-5 space-y-2 border-t border-gray-100 pt-5 text-sm text-gray-700">
                   {plan.features.map((feature) => (
@@ -411,9 +416,12 @@ export function LandingPage() {
             .
           </p>
           <p className="mt-2 text-sm text-gray-500">
-            Every plan is one practitioner account today. Shared practice
-            accounts with multiple seats are in development and will be included
-            in Practice and Clinic when they ship.
+            Seats are shared practice accounts. Solo is one practitioner;
+            Practice includes{" "}
+            {seatsLabel(planLimits("practice").seats).toLowerCase()} and Clinic{" "}
+            {seatsLabel(planLimits("clinic").seats).toLowerCase()} — invite a
+            colleague from the Members page and they work in the same practice
+            as you.
           </p>
         </section>
 

@@ -9,7 +9,14 @@
 // reads `users.plan` from the database (never a hardcoded "trial").
 
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { PLANS, getPlan, planLabel, planRank } from "~/lib/plans";
+import {
+  PLANS,
+  clientLimitLabel,
+  getPlan,
+  planLabel,
+  planRank,
+  seatsLabel,
+} from "~/lib/plans";
 
 type CheckoutState = "success" | "cancel";
 
@@ -249,7 +256,9 @@ function BillingPage() {
                   </span>{" "}
                   plan
                   {currentPlanDef
-                    ? ` (${currentPlanDef.price}${currentPlanDef.period}, ${currentPlanDef.clientLimit.toLowerCase()})`
+                    ? ` (${currentPlanDef.price}${currentPlanDef.period}, ${clientLimitLabel(
+                        currentPlanDef.clientLimit,
+                      ).toLowerCase()})`
                     : ""}
                   .{" "}
                   {activationPending
@@ -344,7 +353,7 @@ function BillingPage() {
                         d="m4.5 12.75 6 6 9-13.5"
                       />
                     </svg>
-                    {plan.clientLimit}
+                    {clientLimitLabel(plan.clientLimit)}
                   </li>
                   <li className="flex items-center gap-2 text-sm font-medium text-gray-700">
                     <svg
@@ -361,7 +370,7 @@ function BillingPage() {
                         d="m4.5 12.75 6 6 9-13.5"
                       />
                     </svg>
-                    {plan.seats}
+                    {seatsLabel(plan.seats)}
                   </li>
                   {plan.features.map((f) => (
                     <li key={f} className="flex items-center gap-2 text-sm text-gray-500">

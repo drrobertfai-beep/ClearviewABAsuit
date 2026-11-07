@@ -25,8 +25,18 @@ export interface Plan {
   priceUsd: number;
   /** Billing period label rendered next to the price. */
   period: string;
-  clientLimit: string;
-  seats: string;
+  /**
+   * Maximum number of active practitioner seats on this plan.
+   * `null` means unlimited. THE source of truth for seat enforcement
+   * (src/db/practice-members.ts) and for every piece of copy that mentions
+   * seats — never hardcode a seat count anywhere else.
+   */
+  seats: number | null;
+  /**
+   * Maximum number of active clients on this plan. `null` means unlimited.
+   * Single source of truth for client-cap copy.
+   */
+  clientLimit: number | null;
   features: readonly string[];
   /** Stripe-hosted Payment Link — checkout happens on Stripe's domain. */
   stripePaymentLink: string;
@@ -53,8 +63,8 @@ export const PLANS: readonly Plan[] = [
     price: "$49",
     priceUsd: 49,
     period: "/mo",
-    clientLimit: "Up to 10 clients",
-    seats: "1 practitioner",
+    clientLimit: 10,
+    seats: 1,
     features: [
       "Unlimited assessments",
       "Treatment plan generator",
@@ -81,8 +91,8 @@ export const PLANS: readonly Plan[] = [
     price: "$149",
     priceUsd: 149,
     period: "/mo",
-    clientLimit: "Up to 30 clients",
-    seats: "1 practitioner",
+    clientLimit: 30,
+    seats: 5,
     features: [
       "Everything in Solo",
       "Priority email support",
@@ -108,8 +118,8 @@ export const PLANS: readonly Plan[] = [
     price: "$299",
     priceUsd: 299,
     period: "/mo",
-    clientLimit: "Unlimited clients",
-    seats: "1 practitioner",
+    clientLimit: null,
+    seats: null,
     features: [
       "Everything in Practice",
       "Onboarding and setup help",
@@ -165,4 +175,52 @@ export function checkoutUrl(id: string | null | undefined): string | null {
 export function planRank(id: string | null | undefined): number {
   const plan = getPlan(id);
   return plan ? plan.priceUsd : 0;
+}
+
+// ---------------------------------------------------------------------------
+// Limit labels — derived from the numbers above, never written by hand
+// ---------------------------------------------------------------------------
+
+/** `1` → "1 practitioner", `5` → "5 practitioners", `null` → "Unlimited practitioners". */
+export function seatsLabel(seats: number | null): string {
+  if (seats === null) return "Unlimited practitioners";
+  return `${seats} practitioner${seats === 1 ? "" : "s"}`;
+}
+
+/** `10` → "Up to 10 clients", `null` → "Unlimited clients". */
+export function clientLimitLabel(clientLimit: number | null): string {
+  if (clientLimit === null) return "Unlimited clients";
+  return `Up to ${clientLimit} clients`;
+}
+
+export interface PlanLimits {
+  /** Practitioner seats included in the plan; null = unlimited. */
+  seats: number | null;
+  /** Active clients included in the plan; null = unlimited. */
+  clientLimit: number | null;
+}
+
+/**
+ * Limits for any value of `practices.plan` / `users.plan`.
+ *
+ * `trial` is not a purchasable plan, so it runs on the entry (Solo) limits —
+ * defined by reading the Solo plan, so the numbers still live in one place.
+ */
+export function planLimits(tier: string | null | undefined): PlanLimits {
+  const plan = getPlan(tier) ?? getPlan("solo");
+  return {
+    seats: plan?.seats ?? 1,
+    clientLimit: plan?.clientLimit ?? 10,
+  };
+}
+
+/** Human-readable seat usage, e.g. "3 of 5 seats used" / "3 seats used". */
+export function seatUsageLabel(used: number, seats: number | null): string {
+  if (seats === null) return `${used} seat${used === 1 ? "" : "s"} used`;
+  return `${used} of ${seats} seat${seats === 1 ? "" : "s"} used`;
+}
+
+/** True when one more practitioner fits under `seats`. */
+export function hasSeatFor(used: number, seats: number | null): boolean {
+  return seats === null || used < seats;
 }
