@@ -44,10 +44,15 @@ export const Route = createRootRoute({
     const guestOnlyPaths = ["/login", "/register", "/offline"];
 
     const pathname = location.pathname.replace(/\/+$/, "") || "/";
+    // An invite link must be readable before the visitor has an account, so
+    // /invite/<token> is open to signed-out visitors too. The page itself shows
+    // only the practice name, the offered role and the invited address.
+    const isOpenInvitePath = pathname.startsWith("/invite/");
 
     if (
       !user &&
       !openPaths.includes(pathname) &&
+      !isOpenInvitePath &&
       !guestOnlyPaths.includes(pathname)
     ) {
       throw redirect({ to: "/login" });
@@ -192,6 +197,16 @@ const NAV_ITEMS: NavItem[] = [
       </svg>
     ),
     roles: ["bcba", "admin"],
+  },
+  {
+    to: "/practice/members",
+    label: "Members",
+    icon: (
+      <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
+        <path strokeLinecap="round" strokeLinejoin="round" d="M18 7.5v3m0 0v3m0-3h3m-3 0h-3m-2.25-4.125a3.375 3.375 0 1 1-6.75 0 3.375 3.375 0 0 1 6.75 0ZM3 19.235v-.11a6.375 6.375 0 0 1 12.75 0v.109A12.318 12.318 0 0 1 9.374 21c-2.331 0-4.512-.645-6.374-1.766Z" />
+      </svg>
+    ),
+    roles: [],
   },
   {
     to: "/billing",

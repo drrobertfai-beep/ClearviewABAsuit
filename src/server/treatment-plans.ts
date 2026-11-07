@@ -22,7 +22,7 @@ import type {
   TreatmentPlanStatus,
   Assessment,
 } from "~/db/types";
-import { requireSession } from "~/server/auth-guard";
+import { requirePracticeRole, requireSession } from "~/server/auth-guard";
 import {
   normalizeSchedule,
   normalizeServiceLines,
@@ -111,7 +111,11 @@ export const createTreatmentPlanFn = createServerFn({ method: "POST" })
       },
   )
   .handler(async ({ data }) => {
-    const { practiceId, user } = await requireSession();
+    const { practiceId, user } = await requirePracticeRole([
+      "owner",
+      "admin",
+      "clinician",
+    ]);
     const plan = await createTreatmentPlan(
       practiceId,
       {
@@ -157,7 +161,11 @@ export const updateTreatmentPlanFn = createServerFn({ method: "POST" })
       },
   )
   .handler(async ({ data }) => {
-    const { practiceId, user } = await requireSession();
+    const { practiceId, user } = await requirePracticeRole([
+      "owner",
+      "admin",
+      "clinician",
+    ]);
     return updateTreatmentPlan(
       practiceId,
       data.id,
@@ -172,7 +180,11 @@ export const updateTreatmentPlanFn = createServerFn({ method: "POST" })
 export const deleteTreatmentPlanFn = createServerFn({ method: "POST" })
   .validator((d: unknown) => d as { id: string })
   .handler(async ({ data }) => {
-    const { practiceId, user } = await requireSession();
+    const { practiceId, user } = await requirePracticeRole([
+      "owner",
+      "admin",
+      "clinician",
+    ]);
     return deleteTreatmentPlan(practiceId, data.id, user.email);
   });
 
