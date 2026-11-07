@@ -21,6 +21,7 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { sql } from "./sql";
 import { applySchema } from "./migrate";
+import { hashPassword, verifyPassword } from "~/server/password";
 import { computeVBMAPPScoring } from "../lib/vbmapp-scoring";
 import {
   VB_MAPP_MILESTONES,
@@ -1111,16 +1112,17 @@ async function ensureDemoUser(): Promise<{
 
     // The documented demo password must actually work for a demo. Only rewrite
     // the hash if the documented password does not already verify.
+    //
+    // `verifyPassword` (src/server/password.ts) is runtime-agnostic Node
+    // `crypto.scrypt` and fails closed on hashes it cannot parse — including
+    // the legacy Bun/argon2id strings written by older seeds. That is the
+    // intended behaviour: an unverifiable hash gets replaced with a fresh
+    // scrypt hash below, so the demo account always works after a seed.
     let passwordReset = false;
-    let valid = false;
-    try {
-      valid = await Bun.password.verify(DEMO_PASSWORD, user.password_hash);
-    } catch {
-      valid = false; // placeholder / non-bcrypt hash from an old seed
-    }
+    const valid = await verifyPassword(DEMO_PASSWORD, user.password_hash);
     if (!valid) {
       await neon.query("UPDATE users SET password_hash = $1 WHERE id = $2", [
-        await Bun.password.hash(DEMO_PASSWORD),
+        await hashPassword(DEMO_PASSWORD),
         user.id,
       ]);
       passwordReset = true;
@@ -1135,7 +1137,7 @@ async function ensureDemoUser(): Promise<{
     [
       DEMO_EMAIL,
       "Dr. Demo Practitioner",
-      await Bun.password.hash(DEMO_PASSWORD),
+      await hashPassword(DEMO_PASSWORD),
     ],
   );
   return {
