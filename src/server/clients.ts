@@ -48,7 +48,11 @@ export const getClientFn = createServerFn({ method: "GET" })
 export const createClientFn = createServerFn({ method: "POST" })
   .validator((d: unknown) => d as ClientInput)
   .handler(async ({ data }) => {
-    const { practiceId, user } = await requireSession();
+    const { practiceId, user } = await requirePracticeRole([
+      "owner",
+      "admin",
+      "clinician",
+    ]);
     return createClient(practiceId, data, user.email);
   });
 
@@ -64,7 +68,11 @@ export const updateClientFn = createServerFn({ method: "POST" })
       },
   )
   .handler(async ({ data }) => {
-    const { practiceId, user } = await requireSession();
+    const { practiceId, user } = await requirePracticeRole([
+      "owner",
+      "admin",
+      "clinician",
+    ]);
     return updateClient(practiceId, data.id, data.data, user.email);
   });
 
@@ -74,7 +82,11 @@ export const updateClientFn = createServerFn({ method: "POST" })
 export const deleteClientFn = createServerFn({ method: "POST" })
   .validator((d: unknown) => d as { id: string })
   .handler(async ({ data }) => {
-    const { practiceId, user } = await requireSession();
+    const { practiceId, user } = await requirePracticeRole([
+      "owner",
+      "admin",
+      "clinician",
+    ]);
     return deleteClient(practiceId, data.id, user.email);
   });
 
