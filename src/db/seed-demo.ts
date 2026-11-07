@@ -34,9 +34,13 @@ import {
 // ---------------------------------------------------------------------------
 // Demo account
 // ---------------------------------------------------------------------------
+// The identity lives in ./demo-account so the tenancy backfill in migrate.ts
+// and this seed agree on which account owns the demo practice.
 
-export const DEMO_EMAIL = "demo@clearviewaba.com";
-export const DEMO_PASSWORD = "demo123456";
+import { DEMO_EMAIL, DEMO_PASSWORD } from "./demo-account";
+import { ensurePracticeForUser } from "./practices";
+
+export { DEMO_EMAIL, DEMO_PASSWORD };
 
 // ---------------------------------------------------------------------------
 // Deterministic IDs — keeps /clients/<id> and /treatment-plans/<id> links stable
@@ -1093,17 +1097,22 @@ async function removeDemoData(): Promise<Record<string, number>> {
 
 async function ensureDemoUser(): Promise<{
   id: string;
+  name: string;
   created: boolean;
   passwordReset: boolean;
 }> {
   const neon = sql();
   const existing = await neon.query(
-    "SELECT id, password_hash FROM users WHERE lower(email) = lower($1)",
+    "SELECT id, name, password_hash FROM users WHERE lower(email) = lower($1)",
     [DEMO_EMAIL],
   );
 
   if (existing.length > 0) {
-    const user = existing[0] as { id: string; password_hash: string };
+    const user = existing[0] as {
+      id: string;
+      name: string;
+      password_hash: string;
+    };
     // Keep the account, but make sure it demonstrates an active paid plan.
     await neon.query(
       "UPDATE users SET plan = 'practice', account_status = 'active' WHERE id = $1",
@@ -1127,7 +1136,7 @@ async function ensureDemoUser(): Promise<{
       ]);
       passwordReset = true;
     }
-    return { id: user.id, created: false, passwordReset };
+    return { id: user.id, name: user.name, created: false, passwordReset };
   }
 
   const inserted = await neon.query(
@@ -1142,6 +1151,7 @@ async function ensureDemoUser(): Promise<{
   );
   return {
     id: String((inserted[0] as { id: string }).id),
+    name: "Dr. Demo Practitioner",
     created: true,
     passwordReset: false,
   };
@@ -1162,14 +1172,18 @@ interface AuditRow {
   newValues?: Record<string, unknown> | null;
 }
 
-async function insertAuditRows(rows: AuditRow[]): Promise<number> {
+async function insertAuditRows(
+  rows: AuditRow[],
+  practiceId: string,
+): Promise<number> {
   const neon = sql();
   for (const row of rows) {
     await neon.query(
-      `INSERT INTO audit_log (id, table_name, record_id, action, changed_by, changed_at, old_values, new_values, is_demo)
-       VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8::jsonb, TRUE)`,
+      `INSERT INTO audit_log (id, practice_id, table_name, record_id, action, changed_by, changed_at, old_values, new_values, is_demo)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9::jsonb, TRUE)`,
       [
         demoId(500 + row.n),
+        practiceId,
         row.table,
         row.recordId,
         row.action,
@@ -1207,7 +1221,19 @@ async function seed() {
         : ""),
   );
 
-  // 3. Remove the previous demo practice (idempotency: never duplicates).
+  // 2b. The demo practice. `ensurePracticeForUser` reuses the practice the demo
+  // account already owns (the one the tenancy backfill created) and only makes
+  // a new one when the account has none — so re-seeding never duplicates it.
+  const practice = await ensurePracticeForUser(user.id, user.name, "practice");
+  const practiceId = practice.practiceId;
+  await neon.query(`UPDATE practices SET plan = 'practice' WHERE id = $1`, [
+    practiceId,
+  ]);
+  console.log(
+    `✓ Demo practice: "${practice.practiceName}" (${practiceId}, plan=practice)`,
+  );
+
+  // 3. Remove the previous demo rows (idempotency: never duplicates).
   const removed = await removeDemoData();
   const removedTotal = Object.values(removed).reduce((a, b) => a + b, 0);
   console.log(
@@ -1232,10 +1258,10 @@ async function seed() {
       `INSERT INTO clients (
          id, name, date_of_birth, gender, contact_email, contact_phone, address,
          referral_source, diagnoses, setting, insurance_info, consent_flags,
-         privacy_notes, status, created_at, updated_at, is_demo
+         privacy_notes, status, created_at, updated_at, is_demo, practice_id
        ) VALUES (
          $1, $2, $3::date, $4, $5, $6, $7, $8, $9::jsonb, $10, $11::jsonb,
-         $12::jsonb, $13, $14, $15, $15, TRUE
+         $12::jsonb, $13, $14, $15, $15, TRUE, $16
        )`,
       [
         c.id,
@@ -1253,6 +1279,7 @@ async function seed() {
         c.notes,
         c.status,
         createdAt,
+        practiceId,
       ],
     );
     pushAudit({
@@ -1470,7 +1497,7 @@ async function seed() {
     newValues: { status: "inactive" },
   });
 
-  const auditCount = await insertAuditRows(audit);
+  const auditCount = await insertAuditRows(audit, practiceId);
   console.log(`✓ Audit log: ${auditCount} entries inserted`);
 
   // 9. Summary + idempotency check.
@@ -1524,7 +1551,7 @@ async function remove() {
     console.log(`   ${table.padEnd(16)} ${n}`);
   console.log(
     total > 0
-      ? "\n✅ Demo rows removed. The demo user account was left in place (log in with it any time)."
+      ? "\n✅ Demo rows removed. The demo user account and its (now empty) practice were left in place, so the demo login still works."
       : "\n✅ Nothing to remove — no demo rows found.",
   );
 }

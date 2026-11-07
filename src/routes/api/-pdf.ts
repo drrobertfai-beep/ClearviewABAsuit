@@ -6,6 +6,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
 import { getAssessment, getClient, getTreatmentPlan } from "~/db";
+import { requireSession } from "~/server/auth-guard";
 import type { Assessment, Client, TreatmentPlan } from "~/db/types";
 import {
   VB_MAPP_MILESTONES,
@@ -672,11 +673,14 @@ function buildTreatmentPlanPDF(
 export const generateAssessmentPDF = createServerFn({ method: "GET" })
   .validator((d: unknown) => d as { id: string })
   .handler(async ({ data }) => {
-    const assessment = await getAssessment(data.id);
+    const { practiceId } = await requireSession();
+    const assessment = await getAssessment(practiceId, data.id);
     if (!assessment) {
       throw new Error("Assessment not found");
     }
-    const client = assessment.client_id ? await getClient(assessment.client_id) : null;
+    const client = assessment.client_id
+      ? await getClient(practiceId, assessment.client_id)
+      : null;
     const pdfBytes = buildAssessmentPDF(assessment, client);
     // Return as base64 for client-side download
     return {
@@ -688,14 +692,15 @@ export const generateAssessmentPDF = createServerFn({ method: "GET" })
 export const generateTreatmentPlanPDF = createServerFn({ method: "GET" })
   .validator((d: unknown) => d as { id: string })
   .handler(async ({ data }) => {
-    const plan = await getTreatmentPlan(data.id);
+    const { practiceId } = await requireSession();
+    const plan = await getTreatmentPlan(practiceId, data.id);
     if (!plan) {
       throw new Error("Treatment plan not found");
     }
-    const client = await getClient(plan.client_id);
+    const client = await getClient(practiceId, plan.client_id);
     let assessment: Assessment | null = null;
     if (plan.assessment_id) {
-      assessment = await getAssessment(plan.assessment_id);
+      assessment = await getAssessment(practiceId, plan.assessment_id);
     }
     const pdfBytes = buildTreatmentPlanPDF(plan, client, assessment);
     return {
