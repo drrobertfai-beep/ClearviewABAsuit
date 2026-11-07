@@ -410,6 +410,11 @@ export function LandingPage() {
             </Link>
             .
           </p>
+          <p className="mt-2 text-sm text-gray-500">
+            Every plan is one practitioner account today. Shared practice
+            accounts with multiple seats are in development and will be included
+            in Practice and Clinic when they ship.
+          </p>
         </section>
 
         {/* ----------------------------------------------------- closing CTA */}
