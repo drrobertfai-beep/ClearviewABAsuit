@@ -20,26 +20,6 @@ export interface RequestContext {
   practiceRole: PracticeRole;
 }
 
-export function toSafeUser(
-  user: User,
-  practice: PracticeContext | null,
-): SafeUser {
-  return {
-    id: user.id,
-    email: user.email,
-    name: user.name,
-    role: user.role,
-    plan: user.plan,
-    trial_ends_at: user.trial_ends_at,
-    stripe_customer_id: user.stripe_customer_id,
-    account_status: user.account_status,
-    created_at: user.created_at,
-    practiceId: practice?.practiceId ?? null,
-    practiceRole: practice?.practiceRole ?? null,
-    practiceName: practice?.practiceName ?? null,
-  };
-}
-
 /**
  * Require an authenticated caller that belongs to a practice.
  * Throws otherwise — callers use the returned `practiceId` for every query.

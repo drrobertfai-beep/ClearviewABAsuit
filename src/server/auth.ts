@@ -10,18 +10,12 @@ import {
   getRequestHost,
   getRequestProtocol,
 } from "@tanstack/react-start/server";
-import {
-  getUserByEmail,
-  getUserById,
-  createSession,
-  getSessionByToken,
-  deleteSession,
-} from "~/db/auth";
-import {
-  createUserWithPractice,
-  ensurePracticeForUser,
-  getActiveMembership,
-} from "~/db/practices";
+// NOTE — server-only data access is imported *lazily, inside each handler*.
+// A top-level `import ... from "~/db/..."` here would be bundled into the
+// browser build: the Start compiler strips the handler bodies but keeps any
+// static import it cannot prove unused (a name shadowed inside a handler is
+// enough to keep it), and `~/db` reaches `node:fs`/`node:crypto`. Lazy imports
+// inside the handler keep every DB/server module out of the client graph.
 import { hashPassword, verifyPassword } from "~/server/password";
 import { shouldUseSecureCookie } from "~/server/session-cookie";
 import { toSafeUser } from "~/server/safe-user";
@@ -85,6 +79,7 @@ export const getSessionFn = createServerFn({ method: "GET" }).handler(async () =
   const token = getCookie(SESSION_COOKIE);
   if (!token) return null;
 
+  const { getSessionByToken } = await import("~/db/auth");
   const result = await getSessionByToken(token);
   if (!result) return null;
 
@@ -103,6 +98,9 @@ export const loginFn = createServerFn({ method: "POST" })
     if (!email || !password) {
       throw new Error("Email and password are required.");
     }
+
+    const { getUserByEmail, createSession } = await import("~/db/auth");
+    const { ensurePracticeForUser } = await import("~/db/practices");
 
     const user = await getUserByEmail(email);
     if (!user) {
@@ -163,6 +161,13 @@ export const registerFn = createServerFn({ method: "POST" })
     }
 
     // Check email uniqueness
+    const { getUserByEmail, createSession, getUserById } = await import(
+      "~/db/auth"
+    );
+    const { createUserWithPractice, getActiveMembership } = await import(
+      "~/db/practices"
+    );
+
     const existing = await getUserByEmail(email);
     if (existing) {
       throw new Error("An account with this email already exists.");
@@ -201,7 +206,6 @@ export const registerFn = createServerFn({ method: "POST" })
 
     // Re-fetch user to get updated plan info, and resolve the practice we just
     // created for them.
-    const { getUserById } = await import("~/db/auth");
     const updatedUser = await getUserById(user.id);
     const practice = await getActiveMembership(user.id);
     return toSafeUser(updatedUser ?? user, practice);
@@ -213,6 +217,7 @@ export const registerFn = createServerFn({ method: "POST" })
 export const logoutFn = createServerFn({ method: "POST" }).handler(async () => {
   const token = getCookie(SESSION_COOKIE);
   if (token) {
+    const { deleteSession } = await import("~/db/auth");
     await deleteSession(token);
   }
   // Match the attributes used when setting it so the browser clears it too.
