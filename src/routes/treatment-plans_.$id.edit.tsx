@@ -231,7 +231,7 @@ function planToLocal(plan: TreatmentPlan): LocalForm {
   };
 }
 
-export const Route = createFileRoute("/treatment-plans/$id/edit")({
+export const Route = createFileRoute("/treatment-plans_/$id/edit")({
   component: TreatmentPlanEditPage,
   loader: async ({ params }) => {
     try {
@@ -1128,6 +1128,10 @@ function TreatmentPlanEditPage() {
     form.authorization_start_date,
     form.authorization_end_date,
   );
+  // The requested service lines and the weekly schedule are entered in two
+  // different tabs, so they drift apart easily. Flag it before export.
+  const hoursMismatch =
+    Math.abs(totalRequestedHours - totalScheduledHours) >= 0.1;
 
 
   // ---- Requested services (structured service lines) ----
@@ -1600,6 +1604,17 @@ function TreatmentPlanEditPage() {
         </div>
       </div>
 
+      {hoursMismatch && (
+        <div
+          data-testid="hours-mismatch-warning-inline"
+          className="rounded-md border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800"
+        >
+          Requested {formatHours(totalRequestedHours)} but the schedule covers{" "}
+          {formatHours(totalScheduledHours)} — add or remove schedule blocks (or
+          adjust the service lines) so the two totals match.
+        </div>
+      )}
+
       <Field label="Clinical Justification / Medical Necessity">
         <p className="text-xs text-gray-500 mb-2">
           The narrative a reviewer reads first: why these services, at this
@@ -1770,6 +1785,40 @@ function TreatmentPlanEditPage() {
             />
           </svg>
           You have unsaved changes
+        </div>
+      )}
+
+      {hoursMismatch && (
+        <div
+          data-testid="hours-mismatch-warning"
+          role="status"
+          className="mb-4 rounded-md border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800"
+        >
+          <div className="flex items-start gap-2">
+            <svg
+              className="mt-0.5 h-4 w-4 shrink-0"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+              strokeWidth={2}
+              aria-hidden="true"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                d="M12 9v3.75m9-.75a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 3.75h.008v.008H12v-.008Z"
+              />
+            </svg>
+            <div>
+              <p className="font-semibold">Weekly hours do not reconcile</p>
+              <p className="mt-0.5">
+                Requested {formatHours(totalRequestedHours)} but the schedule
+                covers {formatHours(totalScheduledHours)}. A reviewer will
+                reject a plan whose weekly schedule does not account for every
+                requested hour.
+              </p>
+            </div>
+          </div>
         </div>
       )}
 

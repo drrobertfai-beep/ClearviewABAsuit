@@ -10,7 +10,7 @@ import {
 } from "~/components/VBMAPPForm";
 import type { Assessment, Client } from "~/db/types";
 
-export const Route = createFileRoute("/assessments/$id/vb-mapp")({
+export const Route = createFileRoute("/assessments_/$id/vb-mapp")({
   component: VBMAPPFormPage,
   loader: async ({ params }) => {
     try {
