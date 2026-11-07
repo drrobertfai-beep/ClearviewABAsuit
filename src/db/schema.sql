@@ -197,6 +197,17 @@ ALTER TABLE treatment_plans ADD COLUMN IF NOT EXISTS authorization_start_date DA
 ALTER TABLE treatment_plans ADD COLUMN IF NOT EXISTS authorization_end_date DATE;
 ALTER TABLE treatment_plans ADD COLUMN IF NOT EXISTS authorization_number TEXT;
 
+-- Titration plan: the phased step-down of authorized hours that a BCBA submits
+-- with the authorization request. `titration_phases` is an array of
+--   { label, start_week, end_week,
+--     lines: [{ cpt_code, hours_per_week }],
+--     criteria_to_step_down, criteria_to_step_up }
+-- Plans created before these columns existed keep NULL / '[]' and are
+-- normalized on read (normalizeTitrationPhases in
+-- src/lib/treatment-plan-authz.ts), so they render and export unchanged.
+ALTER TABLE treatment_plans ADD COLUMN IF NOT EXISTS titration_rationale TEXT;
+ALTER TABLE treatment_plans ADD COLUMN IF NOT EXISTS titration_phases JSONB DEFAULT '[]'::jsonb;
+
 -- ============================================================================
 -- SIGNATURES
 -- ============================================================================

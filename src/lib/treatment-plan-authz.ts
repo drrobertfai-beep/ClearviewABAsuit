@@ -362,3 +362,162 @@ export function authorizationWeeks(
   if (!Number.isFinite(s) || !Number.isFinite(e) || e <= s) return null;
   return Math.round(((e - s) / 86400000 / 7) * 10) / 10;
 }
+
+// ---------------------------------------------------------------------------
+// Titration plan — phased step-down of authorized hours
+// ---------------------------------------------------------------------------
+
+/** Hours per week for one CPT code within one titration phase. */
+export interface TitrationLine {
+  cpt_code: string;
+  hours_per_week: number | null;
+}
+
+/**
+ * One phase of the titration schedule. `start_week` / `end_week` are 1-based
+ * week numbers inside the authorization period (week 1 = the week of
+ * `authorization_start_date`).
+ */
+export interface TitrationPhase {
+  label: string;
+  start_week: number | null;
+  end_week: number | null;
+  lines: TitrationLine[];
+  criteria_to_step_down: string;
+  criteria_to_step_up: string;
+}
+
+/** A blank phase, used when the BCBA adds one in the editor. */
+export function emptyTitrationPhase(
+  index: number,
+  codes: string[] = [],
+): TitrationPhase {
+  return {
+    label: `Phase ${index + 1}`,
+    start_week: null,
+    end_week: null,
+    lines: codes.map((code) => ({ cpt_code: code, hours_per_week: null })),
+    criteria_to_step_down: "",
+    criteria_to_step_up: "",
+  };
+}
+
+/**
+ * Normalizes `treatment_plans.titration_phases` (jsonb). Plans written before
+ * the column existed have no value at all, so anything unreadable becomes [] —
+ * those plans render and export exactly as they did before titration shipped.
+ */
+export function normalizeTitrationPhases(value: unknown): TitrationPhase[] {
+  return asArray(value)
+    .map((raw, i): TitrationPhase | null => {
+      const r = asRecord(raw);
+      if (!r) return null;
+      const lines = asArray(r.lines)
+        .map((l): TitrationLine | null => {
+          const lr = asRecord(l);
+          if (!lr) return null;
+          return {
+            cpt_code: str(lr.cpt_code),
+            hours_per_week: num(lr.hours_per_week),
+          };
+        })
+        .filter((l): l is TitrationLine => l !== null);
+      return {
+        label: str(r.label) || `Phase ${i + 1}`,
+        start_week: num(r.start_week),
+        end_week: num(r.end_week),
+        lines,
+        criteria_to_step_down: str(r.criteria_to_step_down),
+        criteria_to_step_up: str(r.criteria_to_step_up),
+      };
+    })
+    .filter((p): p is TitrationPhase => p !== null);
+}
+
+/** Total hours per week for one phase (one decimal place). */
+export function phaseHours(phase: TitrationPhase): number {
+  const total = phase.lines.reduce(
+    (sum, line) => sum + (line.hours_per_week ?? 0),
+    0,
+  );
+  return Math.round(total * 10) / 10;
+}
+
+/** Total hours per week for every phase, in order. */
+export function titrationPhaseTotals(phases: TitrationPhase[]): number[] {
+  return phases.map(phaseHours);
+}
+
+/** Hours for one CPT code in one phase (null when the phase omits the code). */
+export function phaseHoursForCpt(
+  phase: TitrationPhase,
+  cptCode: string,
+): number | null {
+  const match = phase.lines.find((l) => l.cpt_code === cptCode);
+  return match ? match.hours_per_week : null;
+}
+
+/**
+ * Every CPT code used anywhere in the titration plan, in first-seen order.
+ * Drives the per-code step-down read-out and the seed for new phases.
+ */
+export function titrationCptCodes(phases: TitrationPhase[]): string[] {
+  const seen: string[] = [];
+  for (const phase of phases) {
+    for (const line of phase.lines) {
+      const code = line.cpt_code.trim();
+      if (code && !seen.includes(code)) seen.push(code);
+    }
+  }
+  return seen;
+}
+
+/**
+ * Indexes of phases whose total hours are HIGHER than the phase before it.
+ * A titration steps down, so an increase is almost always a typo — the editor
+ * warns on every index returned here.
+ */
+export function phasesThatIncrease(phases: TitrationPhase[]): number[] {
+  const flagged: number[] = [];
+  for (let i = 1; i < phases.length; i += 1) {
+    if (phaseHours(phases[i]) > phaseHours(phases[i - 1]) + 0.001) {
+      flagged.push(i);
+    }
+  }
+  return flagged;
+}
+
+/** "Weeks 1–8" / "Week 9" / "Weeks 9–16" — "—" when the weeks are not set. */
+export function phaseWeekLabel(phase: TitrationPhase): string {
+  const { start_week: start, end_week: end } = phase;
+  if (start == null && end == null) return "—";
+  if (start != null && end != null) {
+    return start === end ? `Week ${start}` : `Weeks ${start}–${end}`;
+  }
+  return start != null ? `From week ${start}` : `Through week ${end}`;
+}
+
+/**
+ * Phase 1 of a new titration plan: the requested service lines, one line per
+ * CPT code, at the requested hours. Phase 1 must equal what we ask the payer
+ * for, so the BCBA edits down from there instead of retyping.
+ */
+export function firstPhaseFromServices(lines: ServiceLine[]): TitrationPhase {
+  const merged = new Map<string, number>();
+  for (const line of lines) {
+    const code = line.cpt_code.trim();
+    if (!code) continue;
+    merged.set(code, (merged.get(code) ?? 0) + (line.hours_per_week ?? 0));
+  }
+  return {
+    label: "Phase 1",
+    start_week: 1,
+    end_week: null,
+    lines: [...merged.entries()].map(([cpt_code, hours_per_week]) => ({
+      cpt_code,
+      hours_per_week: Math.round(hours_per_week * 10) / 10,
+    })),
+    criteria_to_step_down: "",
+    criteria_to_step_up: "",
+  };
+}
