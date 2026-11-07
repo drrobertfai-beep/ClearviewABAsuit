@@ -208,9 +208,11 @@ export interface PlanLimits {
  */
 export function planLimits(tier: string | null | undefined): PlanLimits {
   const plan = getPlan(tier) ?? getPlan("solo");
+  // `??` must not be used here: null IS the value that means unlimited on the
+  // Clinic plan, so `plan.seats ?? 1` would turn unlimited into one seat.
   return {
-    seats: plan?.seats ?? 1,
-    clientLimit: plan?.clientLimit ?? 10,
+    seats: plan ? plan.seats : 1,
+    clientLimit: plan ? plan.clientLimit : 10,
   };
 }
 
