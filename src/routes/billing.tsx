@@ -268,8 +268,19 @@ function BillingPage() {
               )}
             </div>
             <div className="text-sm text-gray-500">
-              Account:{" "}
-              <span className="font-medium text-gray-700">{user.email ?? "—"}</span>
+              <p>
+                Account:{" "}
+                <span className="font-medium text-gray-700">{user.email ?? "—"}</span>
+              </p>
+              <p className="mt-1">
+                Seats:{" "}
+                <Link
+                  to="/practice/members"
+                  className="font-medium text-indigo-600 hover:text-indigo-500"
+                >
+                  manage practice members
+                </Link>
+              </p>
             </div>
           </div>
         </div>

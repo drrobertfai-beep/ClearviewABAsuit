@@ -4,6 +4,11 @@ import { registerFn } from "~/server/auth";
 import { PLANS, clientLimitLabel, seatsLabel } from "~/lib/plans";
 
 export const Route = createFileRoute("/register")({
+  // `invite` carries an invite token through signup so /invite/<token> can
+  // finish the join straight after the account is created.
+  validateSearch: (search: Record<string, unknown>): { invite?: string } => ({
+    invite: typeof search.invite === "string" ? search.invite : undefined,
+  }),
   component: RegisterPage,
 });
 
@@ -16,6 +21,7 @@ const ROLE_OPTIONS = [
 
 function RegisterPage() {
   const router = useRouter();
+  const search = Route.useSearch();
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -39,6 +45,14 @@ function RegisterPage() {
 
     try {
       await registerFn({ data: { name, email, password, role, plan: selectedPlan } });
+      if (search.invite) {
+        await router.invalidate();
+        await router.navigate({
+          to: "/invite/$token",
+          params: { token: search.invite },
+        });
+        return;
+      }
       router.navigate({ to: "/" });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Registration failed. Please try again.");
