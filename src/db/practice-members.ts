@@ -150,14 +150,26 @@ export async function countActiveSeats(practiceId: string): Promise<number> {
   return Number(rows[0]?.n ?? 0);
 }
 
-/** Number of live invites (unaccepted, unexpired) — each holds a seat. */
-export async function countPendingInvites(practiceId: string): Promise<number> {
+/**
+ * Number of live invites (unaccepted, unexpired) — each holds a seat.
+ *
+ * `excludeInviteId` drops one invite from the count. Acceptance uses it for the
+ * invite being accepted: that invite is converting into an active membership,
+ * so counting it as pending as well would demand two seats for one person and
+ * leave a practice permanently unable to fill its last seat by invite.
+ */
+export async function countPendingInvites(
+  practiceId: string,
+  excludeInviteId?: string | null,
+): Promise<number> {
+  const exclude = excludeInviteId ? excludeInviteId : null;
   const rows = await sql()`
     SELECT count(*)::int AS n
     FROM practice_invites
     WHERE practice_id = ${practiceId}
       AND accepted_at IS NULL
       AND (expires_at IS NULL OR expires_at > now())
+      AND (${exclude}::uuid IS NULL OR id <> ${exclude}::uuid)
   `;
   return Number(rows[0]?.n ?? 0);
 }
@@ -193,14 +205,19 @@ export async function listPendingInvites(
  *
  * A pending invite reserves a seat: otherwise an owner could send ten links on
  * a five-seat plan and the last five acceptances would fail one by one.
+ *
+ * `excludeInviteId` is for the acceptance path only — see countPendingInvites.
  */
-export async function getSeatStatus(practiceId: string): Promise<SeatStatus> {
+export async function getSeatStatus(
+  practiceId: string,
+  excludeInviteId?: string | null,
+): Promise<SeatStatus> {
   const practice = await getPracticeSummary(practiceId);
   const plan = practice?.plan ?? "trial";
   const { seats } = planLimits(plan);
   const [seatsUsed, seatsPending] = await Promise.all([
     countActiveSeats(practiceId),
-    countPendingInvites(practiceId),
+    countPendingInvites(practiceId, excludeInviteId),
   ]);
   return {
     plan,
@@ -453,7 +470,11 @@ export async function acceptInvite(
     existing.length > 0 && String(existing[0].status) === "active";
 
   if (!alreadyMember) {
-    const seatStatus = await getSeatStatus(invite.practiceId);
+    // The invite being accepted is excluded from the pending count: it is
+    // turning into an active membership, not reserving a second seat. Without
+    // this, a practice at limit-minus-one with this invite outstanding counts
+    // the invitee twice and refuses them their own seat forever.
+    const seatStatus = await getSeatStatus(invite.practiceId, invite.id);
     if (!seatStatus.available) {
       return { ok: false, reason: "seats", error: seatLimitMessage(seatStatus) };
     }
