@@ -4,7 +4,7 @@
 // import. Nothing is written until the final button; the review step is a real
 // server-side validation pass (same rules as the commit) so the counts shown
 // before importing are the counts that happen.
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, useRouter } from "@tanstack/react-router";
 import { useMemo, useRef, useState } from "react";
 import { importClientsFn, previewClientImportFn } from "~/server/clients";
 import { CsvParseError, parseCsv } from "~/lib/csv";
@@ -51,6 +51,7 @@ function formatBytes(bytes: number): string {
 }
 
 function ImportClientsPage() {
+  const router = useRouter();
   const [step, setStep] = useState<Step>("upload");
   const [fileName, setFileName] = useState("");
   const [fileSize, setFileSize] = useState(0);
@@ -183,6 +184,10 @@ function ImportClientsPage() {
         failed: response.failed,
       });
       setStep("done");
+      // The client list is a route loader; mark it stale so the new clients are
+      // there when the user lands back on it instead of after a background
+      // refresh.
+      void router.invalidate();
     } catch {
       setError(
         "The import did not finish. No clients were added — please try again.",
