@@ -2,7 +2,7 @@
 // Session and user queries for authentication.
 
 import { sql } from "./sql";
-import type { User } from "./types";
+import type { PracticeContext, PracticeRole, User } from "./types";
 
 export interface Session {
   id: string;
@@ -15,6 +15,12 @@ export interface Session {
 export interface SessionWithUser {
   session: Session;
   user: User;
+  /**
+   * The practice this session is acting in, resolved server-side from
+   * practice_members on every lookup. `null` only for an account that has no
+   * active membership (should not happen after registration + backfill).
+   */
+  practice: PracticeContext | null;
 }
 
 // ============================================================================
@@ -75,12 +81,25 @@ export async function updateUserPlan(
   trialEndsAt?: string | null,
 ): Promise<User | null> {
   const rows = await sql()`
-    UPDATE users
-    SET plan = ${plan},
-        account_status = ${accountStatus},
-        trial_ends_at = ${trialEndsAt ?? null}::timestamptz
-    WHERE id = ${userId}
-    RETURNING *
+    WITH updated AS (
+      UPDATE users
+      SET plan = ${plan},
+          account_status = ${accountStatus},
+          trial_ends_at = ${trialEndsAt ?? null}::timestamptz
+      WHERE id = ${userId}
+      RETURNING *
+    ), synced_practice AS (
+      -- practices.plan is the billing-relevant tier; keep it in step with the
+      -- owning user's plan (see syncPracticePlan in src/db/practices.ts).
+      UPDATE practices p
+      SET plan = ${plan}
+      WHERE p.id IN (
+        SELECT practice_id FROM practice_members
+        WHERE user_id = ${userId} AND role = 'owner' AND status = 'active'
+      )
+      RETURNING id
+    )
+    SELECT * FROM updated
   `;
   if (rows.length === 0) return null;
   return rowToUser(rows[0]);
@@ -119,9 +138,18 @@ export async function getSessionByToken(token: string): Promise<SessionWithUser 
            u.plan as u_plan, u.trial_ends_at as u_trial_ends_at,
            u.stripe_customer_id as u_stripe_customer_id,
            u.account_status as u_account_status,
-           u.created_at as u_created_at
+           u.created_at as u_created_at,
+           p.id as p_id, p.name as p_name, p.plan as p_plan, pm.role as pm_role
     FROM sessions s
     JOIN users u ON u.id = s.user_id
+    LEFT JOIN LATERAL (
+      SELECT pm.practice_id, pm.role
+      FROM practice_members pm
+      WHERE pm.user_id = u.id AND pm.status = 'active'
+      ORDER BY pm.joined_at ASC
+      LIMIT 1
+    ) pm ON TRUE
+    LEFT JOIN practices p ON p.id = pm.practice_id
     WHERE s.token = ${token} AND s.expires_at > now()
     LIMIT 1
   `;
@@ -136,6 +164,14 @@ export async function getSessionByToken(token: string): Promise<SessionWithUser 
       created_at: r.s_created_at instanceof Date ? r.s_created_at.toISOString() : String(r.s_created_at),
     },
     user: rowToUser(r),
+    practice: r.p_id
+      ? {
+          practiceId: String(r.p_id),
+          practiceName: String(r.p_name),
+          practicePlan: r.p_plan as PracticeContext["practicePlan"],
+          practiceRole: r.pm_role as PracticeRole,
+        }
+      : null,
   };
 }
 

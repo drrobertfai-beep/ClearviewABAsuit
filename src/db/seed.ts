@@ -5,7 +5,12 @@
 // Requires DATABASE_URL in the environment (or a .env file in the project root).
 
 import { sql } from "./sql";
-import { createClient, createAssessment, createTreatmentPlan } from "../db";
+import {
+  createClient,
+  createAssessment,
+  createTreatmentPlan,
+} from "../db";
+import { ensurePracticeForUser } from "./practices";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 
@@ -127,6 +132,9 @@ async function seed() {
   await neonClient.query("DELETE FROM assessments");
   await neonClient.query("DELETE FROM users");
   await neonClient.query("DELETE FROM clients");
+  // practices are only referenced by clients + practice_members; memberships
+  // cascade with the users deleted above.
+  await neonClient.query("DELETE FROM practices");
   console.log("✓ Existing seed data cleared\n");
 
   // ── Users ────────────────────────────────────────────────────────────
@@ -140,8 +148,18 @@ async function seed() {
     console.log(`  ${u.role}: ${u.name} <${u.email}>`);
   }
 
+  // ── Practice (tenant) ────────────────────────────────────────────────
+  // Every client must belong to a practice; the seed's BCBA owns this one.
+  const practice = await ensurePracticeForUser(
+    String(users[0].id),
+    String(users[0].name),
+    "trial",
+  );
+  const practiceId = practice.practiceId;
+  console.log(`✓ Practice seeded: ${practice.practiceName} (${practiceId})`);
+
   // ── Clients ──────────────────────────────────────────────────────────
-  const client1 = await createClient({
+  const client1 = await createClient(practiceId, {
     name: "Liam O'Connor",
     date_of_birth: "2018-03-15",
     gender: "male",
@@ -170,7 +188,7 @@ async function seed() {
   }, "seed-script");
   console.log(`\n✓ Client 1: ${client1.name} (${client1.id})`);
 
-  const client2 = await createClient({
+  const client2 = await createClient(practiceId, {
     name: "Sofia Martinez",
     date_of_birth: "2020-07-22",
     gender: "female",
@@ -200,7 +218,7 @@ async function seed() {
   console.log(`✓ Client 2: ${client2.name} (${client2.id})`);
 
   // ── Assessment (VB-MAPP for Liam) ────────────────────────────────────
-  const assessment = await createAssessment({
+  const assessment = await createAssessment(practiceId, {
     client_id: client1.id,
     tool_name: "VB-MAPP",
     tool_version: "2.0",
@@ -285,7 +303,7 @@ async function seed() {
   console.log(`\n✓ Assessment: ${assessment.tool_name} (${assessment.id})`);
 
   // ── Treatment Plan (Draft for Liam) ──────────────────────────────────
-  const plan = await createTreatmentPlan({
+  const plan = await createTreatmentPlan(practiceId, {
     client_id: client1.id,
     assessment_id: assessment.id,
     reason_for_referral: "Liam was referred by Dr. Patel (pediatrician) following ASD diagnosis at age 3. Parents report delayed speech, limited social engagement with peers, repetitive play patterns, and difficulty following multi-step instructions. Standardized assessments confirm deficits in communication, social skills, and adaptive functioning consistent with Autism Spectrum Disorder.",

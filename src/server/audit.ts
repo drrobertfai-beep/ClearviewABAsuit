@@ -1,6 +1,10 @@
 // ClearView ABA Suite — Audit Log Server Functions
+//
+// The audit trail is practice-scoped: every entry is stamped with the practice
+// of the record it describes, and only that practice's entries are returned.
 import { createServerFn } from "@tanstack/react-start";
 import { getAuditLog, getAuditEntry } from "~/db";
+import { requireSession } from "~/server/auth-guard";
 
 export const getAuditLogFn = createServerFn({ method: "GET" })
   .validator(
@@ -16,11 +20,13 @@ export const getAuditLogFn = createServerFn({ method: "GET" })
       },
   )
   .handler(async ({ data }) => {
-    return getAuditLog(data);
+    const { practiceId } = await requireSession();
+    return getAuditLog(practiceId, data);
   });
 
 export const getAuditEntryFn = createServerFn({ method: "GET" })
   .validator((d: unknown) => d as { id: string })
   .handler(async ({ data }) => {
-    return getAuditEntry(data.id);
+    const { practiceId } = await requireSession();
+    return getAuditEntry(practiceId, data.id);
   });

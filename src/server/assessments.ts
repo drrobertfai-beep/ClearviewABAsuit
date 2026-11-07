@@ -1,6 +1,9 @@
 // ClearView ABA Suite — Assessment server functions
 // All data mutations happen server-side via createServerFn.
-// Wraps the db.ts CRUD helpers with audit logging (changedBy = "system" for MVP).
+//
+// Every handler resolves the caller's practice from the session and passes it to
+// the db layer. Assessments reach their practice through their client, so an
+// assessment (or client id) from another practice reads as "not found".
 
 import { createServerFn } from "@tanstack/react-start";
 import {
@@ -12,6 +15,7 @@ import {
 } from "~/db";
 import type { Assessment, AssessmentStatus } from "~/db/types";
 import { computeVBMAPPScoring } from "~/lib/vbmapp-scoring";
+import { requireSession } from "~/server/auth-guard";
 
 // ---------------------------------------------------------------------------
 // List assessments (with optional filters)
@@ -24,6 +28,7 @@ export const listAssessmentsFn = createServerFn({ method: "GET" })
         | undefined,
   )
   .handler(async ({ data }) => {
+    const { practiceId } = await requireSession();
     const opts: {
       status?: AssessmentStatus;
       clientId?: string;
@@ -39,16 +44,17 @@ export const listAssessmentsFn = createServerFn({ method: "GET" })
     if (data?.clientId) {
       opts.clientId = data.clientId;
     }
-    return listAssessments(opts);
+    return listAssessments(practiceId, opts);
   });
 
 // ---------------------------------------------------------------------------
-// Get a single assessment by ID
+// Get a single assessment by ID (null when it belongs to another practice)
 // ---------------------------------------------------------------------------
 export const getAssessmentFn = createServerFn({ method: "GET" })
   .validator((d: unknown) => d as { id: string })
   .handler(async ({ data }) => {
-    return getAssessment(data.id);
+    const { practiceId } = await requireSession();
+    return getAssessment(practiceId, data.id);
   });
 
 // ---------------------------------------------------------------------------
@@ -64,18 +70,20 @@ export const createAssessmentFn = createServerFn({ method: "POST" })
       },
   )
   .handler(async ({ data }) => {
+    const { practiceId, user } = await requireSession();
     const assessment = await createAssessment(
+      practiceId,
       {
         client_id: data.clientId,
         tool_name: data.toolName as Assessment["tool_name"],
         tool_version: data.toolVersion ?? null,
         assessment_date: new Date().toISOString().split("T")[0],
-        assessor_name: "system",
+        assessor_name: user.name,
         status: "draft",
         raw_scores: {},
         summary_notes: null,
       },
-      "system",
+      user.email,
     );
     return assessment;
   });
@@ -97,6 +105,7 @@ export const updateAssessmentFn = createServerFn({ method: "POST" })
       },
   )
   .handler(async ({ data }) => {
+    const { practiceId, user } = await requireSession();
     const patch: Record<string, unknown> = {};
 
     if (data.data.raw_scores !== undefined) {
@@ -116,9 +125,10 @@ export const updateAssessmentFn = createServerFn({ method: "POST" })
     }
 
     return updateAssessment(
+      practiceId,
       data.id,
       patch as Partial<Omit<Assessment, "id" | "created_at" | "updated_at">>,
-      "system",
+      user.email,
     );
   });
 
@@ -128,5 +138,6 @@ export const updateAssessmentFn = createServerFn({ method: "POST" })
 export const deleteAssessmentFn = createServerFn({ method: "POST" })
   .validator((d: unknown) => d as { id: string })
   .handler(async ({ data }) => {
-    return deleteAssessment(data.id, "system");
+    const { practiceId, user } = await requireSession();
+    return deleteAssessment(practiceId, data.id, user.email);
   });

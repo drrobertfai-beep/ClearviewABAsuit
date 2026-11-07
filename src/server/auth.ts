@@ -12,41 +12,22 @@ import {
 } from "@tanstack/react-start/server";
 import {
   getUserByEmail,
-  createUser,
+  getUserById,
   createSession,
   getSessionByToken,
   deleteSession,
 } from "~/db/auth";
+import {
+  createUserWithPractice,
+  ensurePracticeForUser,
+  getActiveMembership,
+} from "~/db/practices";
 import { hashPassword, verifyPassword } from "~/server/password";
 import { shouldUseSecureCookie } from "~/server/session-cookie";
-import type { User } from "~/db/types";
+import { toSafeUser } from "~/server/safe-user";
+import type { SafeUser } from "~/server/safe-user";
 
-// ============================================================================
-// SafeUser — public user object (no password_hash)
-// ============================================================================
-export interface SafeUser {
-  id: string;
-  email: string;
-  name: string;
-  role: User["role"];
-  plan: User["plan"];
-  trial_ends_at: string | null;
-  account_status: User["account_status"];
-  created_at: string;
-}
-
-function toSafeUser(user: User): SafeUser {
-  return {
-    id: user.id,
-    email: user.email,
-    name: user.name,
-    role: user.role,
-    plan: user.plan,
-    trial_ends_at: user.trial_ends_at,
-    account_status: user.account_status,
-    created_at: user.created_at,
-  };
-}
+export type { SafeUser };
 
 // ============================================================================
 // Session config
@@ -107,7 +88,8 @@ export const getSessionFn = createServerFn({ method: "GET" }).handler(async () =
   const result = await getSessionByToken(token);
   if (!result) return null;
 
-  return toSafeUser(result.user);
+  // The practice is resolved from the session on every request, server-side.
+  return toSafeUser(result.user, result.practice);
 });
 
 // ============================================================================
@@ -132,6 +114,12 @@ export const loginFn = createServerFn({ method: "POST" })
       throw new Error("Invalid email or password.");
     }
 
+    // Tenancy: resolve the practice this account acts in. `ensurePracticeForUser`
+    // is a safety net for accounts created before practices existed (or by a
+    // script): they get their own practice on first login instead of seeing
+    // every row in the database.
+    const practice = await ensurePracticeForUser(user.id, user.name, user.plan);
+
     // Create session
     const token = crypto.randomUUID();
     const expiresAt = new Date(Date.now() + SESSION_MAX_AGE * 1000);
@@ -140,7 +128,7 @@ export const loginFn = createServerFn({ method: "POST" })
     // Set the session cookie (httpOnly, SameSite=Lax, Secure on HTTPS/prod)
     setCookie(SESSION_COOKIE, token, sessionCookieOptions());
 
-    return toSafeUser(user);
+    return toSafeUser(user, practice);
   });
 
 // ============================================================================
@@ -180,14 +168,27 @@ export const registerFn = createServerFn({ method: "POST" })
       throw new Error("An account with this email already exists.");
     }
 
-    // Hash password and create user
+    // Hash password, then create the user AND their practice AND their owner
+    // membership in one statement (a single implicit transaction), so a fresh
+    // signup always lands in a working, empty, isolated practice.
     const passwordHash = await hashPassword(password);
-    const user = await createUser(name, email, passwordHash, role);
+    const requestedPlan =
+      plan && ["solo", "practice", "clinic"].includes(plan)
+        ? (plan as "solo" | "practice" | "clinic")
+        : "trial";
+    const user = await createUserWithPractice(
+      name,
+      email,
+      passwordHash,
+      role,
+      requestedPlan,
+    );
 
-    // If plan was specified, update the user's plan (default is "trial" from DB)
-    if (plan && ["solo", "practice", "clinic"].includes(plan)) {
+    // Keep the billing columns honest: account_status stays "trial" until the
+    // Stripe webhook (phase 3) flips it to "active".
+    if (requestedPlan !== "trial") {
       const { updateUserPlan } = await import("~/db/auth");
-      await updateUserPlan(user.id, plan as "solo" | "practice" | "clinic", "trial");
+      await updateUserPlan(user.id, requestedPlan, "trial");
     }
 
     // Create session (auto-login)
@@ -198,10 +199,12 @@ export const registerFn = createServerFn({ method: "POST" })
     // Set the session cookie (httpOnly, SameSite=Lax, Secure on HTTPS/prod)
     setCookie(SESSION_COOKIE, token, sessionCookieOptions());
 
-    // Re-fetch user to get updated plan info
+    // Re-fetch user to get updated plan info, and resolve the practice we just
+    // created for them.
     const { getUserById } = await import("~/db/auth");
     const updatedUser = await getUserById(user.id);
-    return toSafeUser(updatedUser ?? user);
+    const practice = await getActiveMembership(user.id);
+    return toSafeUser(updatedUser ?? user, practice);
   });
 
 // ============================================================================

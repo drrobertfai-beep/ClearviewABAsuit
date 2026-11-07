@@ -5,6 +5,20 @@
 CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 
 -- ============================================================================
+-- PRACTICES (multi-tenant root)
+-- ============================================================================
+-- A practice is the tenant boundary: every client, assessment, treatment plan
+-- and audit entry belongs to exactly one practice. `plan` is the billing tier
+-- for the whole practice and is kept in sync with the owning user's
+-- `users.plan` (see syncPracticePlan in src/db/practices.ts).
+CREATE TABLE IF NOT EXISTS practices (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name TEXT NOT NULL,
+    plan TEXT NOT NULL DEFAULT 'trial' CHECK (plan IN ('trial', 'solo', 'practice', 'clinic')),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- ============================================================================
 -- CLIENTS
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS clients (
@@ -22,12 +36,23 @@ CREATE TABLE IF NOT EXISTS clients (
     consent_flags JSONB DEFAULT '{}'::jsonb,
     privacy_notes TEXT,
     status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'inactive', 'archived')),
+    practice_id UUID REFERENCES practices(id),
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 CREATE INDEX IF NOT EXISTS idx_clients_status ON clients (status);
 CREATE INDEX IF NOT EXISTS idx_clients_name ON clients (name);
+
+-- ----------------------------------------------------------------------------
+-- Tenancy column on clients (idempotent, re-runnable)
+-- ----------------------------------------------------------------------------
+-- `CREATE TABLE IF NOT EXISTS clients` above is a no-op on a database where the
+-- table already exists, so the column is re-asserted here. It is added nullable
+-- on purpose: the backfill in src/db/migrate.ts assigns existing rows a practice
+-- and only then sets NOT NULL, so the migration never fails on a live database.
+ALTER TABLE clients ADD COLUMN IF NOT EXISTS practice_id UUID REFERENCES practices(id);
+CREATE INDEX IF NOT EXISTS idx_clients_practice_id ON clients (practice_id);
 
 -- ============================================================================
 -- USERS (minimal — role-based access)
@@ -64,6 +89,45 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS account_status TEXT NOT NULL DEFAULT 
 UPDATE users SET plan = 'trial' WHERE plan IS NULL;
 ALTER TABLE users ALTER COLUMN plan SET DEFAULT 'trial';
 ALTER TABLE users ALTER COLUMN plan SET NOT NULL;
+
+-- ============================================================================
+-- PRACTICE MEMBERSHIPS
+-- ============================================================================
+-- Who can see a practice's data, and at what permission level.
+--
+-- NOTE: `practice_members.role` (permission level) is a DIFFERENT concept from
+-- `users.role` (clinical credential: bcba / bcaba / admin / parent). Both are
+-- kept: a BCaBA (users.role) can be the `owner` of their own practice
+-- (practice_members.role), or a `clinician` inside a colleague's practice.
+CREATE TABLE IF NOT EXISTS practice_members (
+    practice_id UUID NOT NULL REFERENCES practices(id) ON DELETE CASCADE,
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    role TEXT NOT NULL CHECK (role IN ('owner', 'admin', 'clinician', 'viewer')),
+    status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'removed')),
+    joined_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT practice_members_practice_id_user_id_key UNIQUE (practice_id, user_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_practice_members_user_id ON practice_members (user_id);
+CREATE INDEX IF NOT EXISTS idx_practice_members_practice_id ON practice_members (practice_id);
+
+-- ============================================================================
+-- PRACTICE INVITES (schema only — the accept flow ships in phase 2)
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS practice_invites (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    practice_id UUID NOT NULL REFERENCES practices(id) ON DELETE CASCADE,
+    email TEXT NOT NULL,
+    role TEXT NOT NULL CHECK (role IN ('owner', 'admin', 'clinician', 'viewer')),
+    token TEXT NOT NULL UNIQUE,
+    expires_at TIMESTAMPTZ,
+    accepted_at TIMESTAMPTZ,
+    created_by UUID REFERENCES users(id) ON DELETE SET NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_practice_invites_practice_id ON practice_invites (practice_id);
+CREATE INDEX IF NOT EXISTS idx_practice_invites_email ON practice_invites (lower(email));
 
 -- ============================================================================
 -- ASSESSMENTS
@@ -152,6 +216,12 @@ CREATE INDEX IF NOT EXISTS idx_audit_log_table_record ON audit_log (table_name, 
 CREATE INDEX IF NOT EXISTS idx_audit_log_changed_at ON audit_log (changed_at);
 CREATE INDEX IF NOT EXISTS idx_audit_log_action ON audit_log (action);
 
+-- Tenancy column on the audit trail. Audit rows reference records in several
+-- tables (including signatures, which have no client_id of their own), so the
+-- practice is stamped on the row instead of being derived per query.
+ALTER TABLE audit_log ADD COLUMN IF NOT EXISTS practice_id UUID REFERENCES practices(id);
+CREATE INDEX IF NOT EXISTS idx_audit_log_practice_id ON audit_log (practice_id);
+
 -- ============================================================================
 -- DEMO DATA MARKER
 -- ============================================================================
@@ -181,6 +251,9 @@ ALTER TABLE treatment_plans ENABLE ROW LEVEL SECURITY;
 ALTER TABLE signatures ENABLE ROW LEVEL SECURITY;
 ALTER TABLE audit_log ENABLE ROW LEVEL SECURITY;
 ALTER TABLE users ENABLE ROW LEVEL SECURITY;
+ALTER TABLE practices ENABLE ROW LEVEL SECURITY;
+ALTER TABLE practice_members ENABLE ROW LEVEL SECURITY;
+ALTER TABLE practice_invites ENABLE ROW LEVEL SECURITY;
 
 -- For now, allow authenticated users full access (tighten as auth system matures).
 -- This keeps the MVP functional while maintaining the RLS scaffolding.
@@ -196,6 +269,12 @@ DROP POLICY IF EXISTS audit_log_all_access ON audit_log;
 CREATE POLICY audit_log_all_access ON audit_log FOR ALL USING (true);
 DROP POLICY IF EXISTS users_all_access ON users;
 CREATE POLICY users_all_access ON users FOR ALL USING (true);
+DROP POLICY IF EXISTS practices_all_access ON practices;
+CREATE POLICY practices_all_access ON practices FOR ALL USING (true);
+DROP POLICY IF EXISTS practice_members_all_access ON practice_members;
+CREATE POLICY practice_members_all_access ON practice_members FOR ALL USING (true);
+DROP POLICY IF EXISTS practice_invites_all_access ON practice_invites;
+CREATE POLICY practice_invites_all_access ON practice_invites FOR ALL USING (true);
 
 -- ============================================================================
 -- SESSIONS

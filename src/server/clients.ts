@@ -1,6 +1,9 @@
 // ClearView ABA Suite — Client server functions
 // All data mutations happen server-side via createServerFn.
-// Wraps the db.ts CRUD helpers with audit logging (changedBy = "system" for MVP).
+//
+// Every handler resolves the caller's practice from the session
+// (requireSession) and passes it to the db layer, which constrains every query
+// to that practice. A client id from another practice reads as "not found".
 
 import { createServerFn } from "@tanstack/react-start";
 import {
@@ -10,7 +13,8 @@ import {
   updateClient,
   deleteClient,
 } from "~/db";
-import type { Client, ClientStatus } from "~/db/types";
+import type { ClientInput, ClientStatus } from "~/db";
+import { requireSession } from "~/server/auth-guard";
 
 // ---------------------------------------------------------------------------
 // List clients (with optional status filter)
@@ -18,32 +22,32 @@ import type { Client, ClientStatus } from "~/db/types";
 export const listClientsFn = createServerFn({ method: "GET" })
   .validator((d: unknown) => d as { status?: string } | undefined)
   .handler(async ({ data }) => {
+    const { practiceId } = await requireSession();
     const opts: { status?: ClientStatus } = {};
     if (data?.status && ["active", "inactive", "archived"].includes(data.status)) {
       opts.status = data.status as ClientStatus;
     }
-    return listClients(opts);
+    return listClients(practiceId, opts);
   });
 
 // ---------------------------------------------------------------------------
-// Get a single client by ID
+// Get a single client by ID (null when it belongs to another practice)
 // ---------------------------------------------------------------------------
 export const getClientFn = createServerFn({ method: "GET" })
   .validator((d: unknown) => d as { id: string })
   .handler(async ({ data }) => {
-    return getClient(data.id);
+    const { practiceId } = await requireSession();
+    return getClient(practiceId, data.id);
   });
 
 // ---------------------------------------------------------------------------
-// Create a new client
+// Create a new client — stamped with the caller's practice
 // ---------------------------------------------------------------------------
 export const createClientFn = createServerFn({ method: "POST" })
-  .validator(
-    (d: unknown) =>
-      d as Omit<Client, "id" | "created_at" | "updated_at">,
-  )
+  .validator((d: unknown) => d as ClientInput)
   .handler(async ({ data }) => {
-    return createClient(data, "system");
+    const { practiceId, user } = await requireSession();
+    return createClient(practiceId, data, user.email);
   });
 
 // ---------------------------------------------------------------------------
@@ -54,11 +58,12 @@ export const updateClientFn = createServerFn({ method: "POST" })
     (d: unknown) =>
       d as {
         id: string;
-        data: Partial<Omit<Client, "id" | "created_at" | "updated_at">>;
+        data: Partial<ClientInput>;
       },
   )
   .handler(async ({ data }) => {
-    return updateClient(data.id, data.data, "system");
+    const { practiceId, user } = await requireSession();
+    return updateClient(practiceId, data.id, data.data, user.email);
   });
 
 // ---------------------------------------------------------------------------
@@ -67,5 +72,6 @@ export const updateClientFn = createServerFn({ method: "POST" })
 export const deleteClientFn = createServerFn({ method: "POST" })
   .validator((d: unknown) => d as { id: string })
   .handler(async ({ data }) => {
-    return deleteClient(data.id, "system");
+    const { practiceId, user } = await requireSession();
+    return deleteClient(practiceId, data.id, user.email);
   });

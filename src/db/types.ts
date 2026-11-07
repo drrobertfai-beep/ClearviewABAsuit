@@ -19,6 +19,8 @@ export interface Client {
   consent_flags: unknown;
   privacy_notes: string | null;
   status: ClientStatus;
+  /** Tenant this client belongs to. Resolved server-side; never from the client. */
+  practice_id?: string;
   /** TRUE for rows created by the demo seed script. */
   is_demo?: boolean;
   created_at: string;
@@ -123,6 +125,8 @@ export interface AuditEntry {
   changed_at: string;
   old_values: unknown;
   new_values: unknown;
+  /** Tenant the audited record belongs to. */
+  practice_id?: string | null;
   /** TRUE for entries written by the demo seed script. */
   is_demo?: boolean;
 }
@@ -142,4 +146,52 @@ export interface User {
   stripe_customer_id: string | null;
   account_status: AccountStatus;
   created_at: string;
+}
+
+// ============================================================================
+// PRACTICES / MEMBERSHIPS (multi-tenancy)
+// ============================================================================
+//
+// `practice_members.role` is the PERMISSION level inside a practice. It is a
+// different axis from `User.role`, which is the clinical credential
+// (bcba / bcaba / admin / parent). Do not merge the two.
+export type PracticeRole = "owner" | "admin" | "clinician" | "viewer";
+export type MembershipStatus = "active" | "removed";
+
+export interface Practice {
+  id: string;
+  name: string;
+  plan: PlanTier;
+  created_at: string;
+}
+
+export interface PracticeMember {
+  practice_id: string;
+  user_id: string;
+  role: PracticeRole;
+  status: MembershipStatus;
+  joined_at: string;
+}
+
+export interface PracticeInvite {
+  id: string;
+  practice_id: string;
+  email: string;
+  role: PracticeRole;
+  token: string;
+  expires_at: string | null;
+  accepted_at: string | null;
+  created_by: string | null;
+  created_at: string;
+}
+
+/**
+ * The caller's tenancy context, resolved server-side from the session cookie on
+ * every request. Never accept these values from the browser.
+ */
+export interface PracticeContext {
+  practiceId: string;
+  practiceRole: PracticeRole;
+  practiceName: string;
+  practicePlan: PlanTier;
 }
