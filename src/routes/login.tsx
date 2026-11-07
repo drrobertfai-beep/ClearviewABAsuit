@@ -59,7 +59,7 @@ function LoginPage() {
         </div>
 
         {/* Login form */}
-        <form onSubmit={handleSubmit} className="mt-8 space-y-6">
+        <form onSubmit={handleSubmit} method="post" action="/login" className="mt-8 space-y-6">
           {error && (
             <div className="rounded-md bg-red-50 p-4 border border-red-200">
               <p className="text-sm font-medium text-red-700">{error}</p>

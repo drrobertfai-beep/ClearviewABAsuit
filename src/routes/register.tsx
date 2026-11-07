@@ -77,7 +77,7 @@ function RegisterPage() {
         </div>
 
         {/* Registration form */}
-        <form onSubmit={handleSubmit} className="space-y-10">
+        <form onSubmit={handleSubmit} method="post" action="/register" className="space-y-10">
           {error && (
             <div className="rounded-md bg-red-50 p-4 border border-red-200">
               <p className="text-sm font-medium text-red-700">{error}</p>
