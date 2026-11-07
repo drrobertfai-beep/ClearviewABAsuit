@@ -72,11 +72,27 @@ export type ClientInput = Omit<
 // ============================================================================
 // Helper: coerce row dates to strings so React can render them
 // ============================================================================
+/**
+ * DATE-only columns. The driver hands these back as JS Dates built at local
+ * midnight, so `toISOString()` can slide them to the previous day in any
+ * positive UTC offset. These are calendar dates with no time component — they
+ * are serialized as `YYYY-MM-DD` using the local calendar fields instead.
+ */
+const DATE_ONLY_COLUMNS = new Set([
+  "authorization_start_date",
+  "authorization_end_date",
+]);
+
+function toDateOnly(d: Date): string {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
 function coerceRow<T>(row: Record<string, unknown>): T {
   const out: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(row)) {
     if (v instanceof Date) {
-      out[k] = v.toISOString();
+      out[k] = DATE_ONLY_COLUMNS.has(k) ? toDateOnly(v) : v.toISOString();
     } else {
       out[k] = v;
     }
@@ -539,7 +555,9 @@ export async function createTreatmentPlan(
       concurrent_services, family_history, school_info, maladaptive_behaviors,
       behavior_intervention_plan, skill_acquisition_goals, assessment_outcomes,
       parent_training_goals, service_coordination_goals, discharge_criteria,
-      requested_services, therapy_schedule, status
+      requested_services, therapy_schedule, clinical_justification,
+      authorization_start_date, authorization_end_date, authorization_number,
+      status
     ) VALUES (
       ${data.client_id}, ${data.assessment_id ?? null},
       ${data.reason_for_referral ?? null}, ${data.diagnosis ?? null},
@@ -554,7 +572,11 @@ export async function createTreatmentPlan(
       ${JSON.stringify(data.service_coordination_goals ?? [])}::jsonb,
       ${data.discharge_criteria ?? null},
       ${JSON.stringify(data.requested_services ?? [])}::jsonb,
-      ${JSON.stringify(data.therapy_schedule ?? {})}::jsonb,
+      ${JSON.stringify(data.therapy_schedule ?? [])}::jsonb,
+      ${data.clinical_justification ?? null},
+      ${data.authorization_start_date || null}::date,
+      ${data.authorization_end_date || null}::date,
+      ${data.authorization_number ?? null},
       ${data.status ?? "draft"}
     )
     RETURNING *
@@ -599,12 +621,23 @@ export async function updateTreatmentPlan(
   const scalarFields: (keyof typeof data)[] = [
     "client_id", "assessment_id", "reason_for_referral", "diagnosis",
     "treatment_history", "family_history", "school_info",
-    "behavior_intervention_plan", "assessment_outcomes", "discharge_criteria", "status",
+    "behavior_intervention_plan", "assessment_outcomes", "discharge_criteria",
+    "clinical_justification", "authorization_number", "status",
   ];
   for (const f of scalarFields) {
     if (f in data) {
       parts.push(`${f} = $${idx++}`);
       bindings.push((data as Record<string, unknown>)[f] ?? null);
+    }
+  }
+  // DATE columns reject an empty string, so "" is written as NULL.
+  const dateFields = [
+    "authorization_start_date", "authorization_end_date",
+  ] as const;
+  for (const f of dateFields) {
+    if (f in data) {
+      parts.push(`${f} = $${idx++}::date`);
+      bindings.push((data as Record<string, unknown>)[f] || null);
     }
   }
   const jsonbFields = [

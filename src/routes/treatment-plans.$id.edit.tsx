@@ -9,6 +9,38 @@ import {
 import { getClientFn } from "~/server/clients";
 import { getAssessmentFn } from "~/server/assessments";
 import type { TreatmentPlan, Client, Assessment } from "~/db/types";
+import {
+  CPT_CODES,
+  PROVIDER_TYPES,
+  SERVICE_SETTINGS,
+  WEEK_DAYS,
+  authorizationWeeks,
+  cptLabel,
+  formatDateOnly,
+  formatDuration,
+  formatHours,
+  isKnownCpt,
+  normalizeSchedule,
+  normalizeServiceLines,
+  scheduleDurationMinutes,
+  scheduledHoursPerWeek,
+  totalHoursPerWeek,
+} from "~/lib/treatment-plan-authz";
+import type {
+  ProviderType,
+  ScheduleEntry,
+  ServiceLine,
+  ServiceSetting,
+} from "~/lib/treatment-plan-authz";
+
+/** Display labels for the settings stored in the jsonb payload. */
+const SETTING_LABELS: Record<ServiceSetting, string> = {
+  home: "Home",
+  school: "School",
+  clinic: "Clinic",
+  community: "Community",
+  telehealth: "Telehealth",
+};
 
 // ---- Helpers ----
 function parseJsonField<T>(val: unknown, fallback: T): T {
@@ -67,6 +99,7 @@ type TabId =
   | "outcomes"
   | "parent"
   | "services"
+  | "authorization"
   | "review";
 const TABS: { id: TabId; label: string }[] = [
   { id: "client", label: "Client & Background" },
@@ -76,6 +109,7 @@ const TABS: { id: TabId; label: string }[] = [
   { id: "outcomes", label: "Assessment Outcomes" },
   { id: "parent", label: "Parent & Coordination" },
   { id: "services", label: "Services & Schedule" },
+  { id: "authorization", label: "Authorization Request" },
   { id: "review", label: "Review & Submit" },
 ];
 
@@ -102,19 +136,6 @@ type LocalSkillGoal = {
 };
 type LocalParentGoal = { goal: string; method: string; frequency: string };
 type LocalCoordGoal = { provider: string; goal: string; method: string };
-type LocalService = {
-  service_name: string;
-  cpt_code: string;
-  frequency: string;
-  duration: string;
-  hours_per_week?: number;
-};
-type LocalScheduleEntry = {
-  day: string;
-  time: string;
-  location: string;
-  service_type: string;
-};
 
 interface LocalForm {
   reason_for_referral: string;
@@ -131,8 +152,12 @@ interface LocalForm {
   parent_training_goals: LocalParentGoal[];
   service_coordination_goals: LocalCoordGoal[];
   discharge_criteria: string;
-  requested_services: LocalService[];
-  therapy_schedule: LocalScheduleEntry[];
+  requested_services: ServiceLine[];
+  therapy_schedule: ScheduleEntry[];
+  clinical_justification: string;
+  authorization_start_date: string;
+  authorization_end_date: string;
+  authorization_number: string;
   status: string;
 }
 
@@ -154,6 +179,10 @@ function emptyForm(): LocalForm {
     discharge_criteria: "",
     requested_services: [],
     therapy_schedule: [],
+    clinical_justification: "",
+    authorization_start_date: "",
+    authorization_end_date: "",
+    authorization_number: "",
     status: "draft",
   };
 }
@@ -189,14 +218,15 @@ function planToLocal(plan: TreatmentPlan): LocalForm {
       [],
     ),
     discharge_criteria: plan.discharge_criteria ?? "",
-    requested_services: parseJsonField<LocalService[]>(
-      plan.requested_services,
-      [],
-    ),
-    therapy_schedule: parseJsonField<LocalScheduleEntry[]>(
-      plan.therapy_schedule,
-      [],
-    ),
+    // Normalized on read: plans written before the authorization fields
+    // existed still hold the legacy jsonb shapes (and `therapy_schedule` may
+    // even be the `{}` column default). Both shapes load here.
+    requested_services: normalizeServiceLines(plan.requested_services),
+    therapy_schedule: normalizeSchedule(plan.therapy_schedule),
+    clinical_justification: plan.clinical_justification ?? "",
+    authorization_start_date: plan.authorization_start_date?.slice(0, 10) ?? "",
+    authorization_end_date: plan.authorization_end_date?.slice(0, 10) ?? "",
+    authorization_number: plan.authorization_number ?? "",
     status: plan.status,
   };
 }
@@ -334,6 +364,10 @@ function TreatmentPlanEditPage() {
             discharge_criteria: form.discharge_criteria || null,
             requested_services: form.requested_services,
             therapy_schedule: form.therapy_schedule,
+            clinical_justification: form.clinical_justification || null,
+            authorization_start_date: form.authorization_start_date || null,
+            authorization_end_date: form.authorization_end_date || null,
+            authorization_number: form.authorization_number || null,
             status: form.status as TreatmentPlan["status"],
           },
         },
@@ -1087,198 +1121,501 @@ function TreatmentPlanEditPage() {
     </div>
   );
 
+  // ---- Derived authorization totals ----
+  const totalRequestedHours = totalHoursPerWeek(form.requested_services);
+  const totalScheduledHours = scheduledHoursPerWeek(form.therapy_schedule);
+  const authWeeks = authorizationWeeks(
+    form.authorization_start_date,
+    form.authorization_end_date,
+  );
+
+
+  // ---- Requested services (structured service lines) ----
+  const setServiceLine = (index: number, patch: Partial<ServiceLine>) => {
+    const next = [...form.requested_services];
+    next[index] = { ...next[index], ...patch };
+    update({ requested_services: next });
+  };
+
+  const addServiceLine = () => {
+    update({
+      requested_services: [
+        ...form.requested_services,
+        {
+          cpt_code: "",
+          service_name: "",
+          hours_per_week: null,
+          session_duration_minutes: null,
+          setting: "",
+          provider_type: "",
+        },
+      ],
+    });
+  };
+
+  // ---- Weekly therapy schedule ----
+  const setScheduleEntry = (index: number, patch: Partial<ScheduleEntry>) => {
+    const next = [...form.therapy_schedule];
+    next[index] = { ...next[index], ...patch };
+    update({ therapy_schedule: next });
+  };
+
+  const addScheduleEntry = () => {
+    update({
+      therapy_schedule: [
+        ...form.therapy_schedule,
+        {
+          day: "Monday",
+          start_time: "",
+          end_time: "",
+          service: "",
+          setting: "",
+          provider: "",
+        },
+      ],
+    });
+  };
+
   const renderServicesTab = () => (
-    <div className="space-y-5">
+    <div className="space-y-8">
+      {/* The number an authorization request turns on. */}
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-indigo-200 bg-indigo-50 px-5 py-4">
+        <div>
+          <p className="text-sm font-medium text-indigo-900">
+            Total requested hours per week
+          </p>
+          <p className="text-xs text-indigo-700">
+            Sum of every service line below — this is what the payer authorizes.
+          </p>
+        </div>
+        <p className="text-3xl font-bold text-indigo-700 tabular-nums">
+          {formatHours(totalRequestedHours)}
+        </p>
+      </div>
+
       <fieldset>
-        <legend className="block text-sm font-medium text-gray-700 mb-2">
-          Requested Services
+        <legend className="block text-sm font-medium text-gray-700 mb-1">
+          Requested Services &amp; CPT Codes
         </legend>
-        <div className="space-y-2">
-          {form.requested_services.map((s, i) => (
-            <div key={i} className="flex flex-wrap gap-2 items-start">
-              <input
-                value={s.service_name}
-                onChange={(e) => {
-                  const n = [...form.requested_services];
-                  n[i] = { ...n[i], service_name: e.target.value };
-                  update({ requested_services: n });
-                }}
-                className="input w-36"
-                placeholder="Service"
-              />
-              <input
-                value={s.cpt_code}
-                onChange={(e) => {
-                  const n = [...form.requested_services];
-                  n[i] = { ...n[i], cpt_code: e.target.value };
-                  update({ requested_services: n });
-                }}
-                className="input w-24"
-                placeholder="CPT"
-              />
-              <input
-                value={s.frequency}
-                onChange={(e) => {
-                  const n = [...form.requested_services];
-                  n[i] = { ...n[i], frequency: e.target.value };
-                  update({ requested_services: n });
-                }}
-                className="input w-28"
-                placeholder="Freq."
-              />
-              <input
-                value={s.duration}
-                onChange={(e) => {
-                  const n = [...form.requested_services];
-                  n[i] = { ...n[i], duration: e.target.value };
-                  update({ requested_services: n });
-                }}
-                className="input w-28"
-                placeholder="Duration"
-              />
-              <input
-                type="number"
-                value={s.hours_per_week ?? ""}
-                onChange={(e) => {
-                  const n = [...form.requested_services];
-                  n[i] = {
-                    ...n[i],
-                    hours_per_week: e.target.value
-                      ? Number(e.target.value)
-                      : undefined,
-                  };
-                  update({ requested_services: n });
-                }}
-                className="input w-20"
-                placeholder="Hrs/wk"
-              />
-              <button
-                type="button"
-                onClick={() =>
-                  update({
-                    requested_services: form.requested_services.filter(
-                      (_, j) => j !== i,
-                    ),
-                  })
-                }
-                className="p-2 text-red-400 hover:text-red-600 text-lg"
-                aria-label="Remove"
-              >
-                ×
-              </button>
+        <p className="text-xs text-gray-500 mb-3">
+          One line per service requested for the authorization period. Pick a
+          CPT code or type one under “Other”.
+        </p>
+        <div className="space-y-3">
+          {form.requested_services.map((line, i) => (
+            <div
+              key={i}
+              className="rounded-md border border-gray-200 bg-gray-50/60 p-3"
+            >
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-12">
+                <div className="sm:col-span-4">
+                  <label className="block text-xs font-medium text-gray-600 mb-1">
+                    CPT code
+                  </label>
+                  <select
+                    value={isKnownCpt(line.cpt_code) ? line.cpt_code : ""}
+                    onChange={(e) => {
+                      const code = e.target.value;
+                      if (code === "other") {
+                        setServiceLine(i, { cpt_code: "" });
+                        return;
+                      }
+                      setServiceLine(i, {
+                        cpt_code: code,
+                        service_name:
+                          line.service_name || cptLabel(code) || line.service_name,
+                      });
+                    }}
+                    className="input"
+                    aria-label={`CPT code for service line ${i + 1}`}
+                  >
+                    <option value="">— Select a code —</option>
+                    {CPT_CODES.map((c) => (
+                      <option key={c.code} value={c.code}>
+                        {c.code} — {c.label}
+                      </option>
+                    ))}
+                    <option value="other">Other (type a code)</option>
+                  </select>
+                  <input
+                    value={line.cpt_code}
+                    onChange={(e) =>
+                      setServiceLine(i, { cpt_code: e.target.value })
+                    }
+                    className="input mt-1"
+                    placeholder="Or type a CPT code"
+                    aria-label={`Typed CPT code for service line ${i + 1}`}
+                  />
+                </div>
+                <div className="sm:col-span-8">
+                  <label className="block text-xs font-medium text-gray-600 mb-1">
+                    Service description
+                  </label>
+                  <input
+                    value={line.service_name}
+                    onChange={(e) =>
+                      setServiceLine(i, { service_name: e.target.value })
+                    }
+                    className="input"
+                    placeholder="e.g. Adaptive behavior treatment by protocol"
+                  />
+                </div>
+                <div className="sm:col-span-2">
+                  <label className="block text-xs font-medium text-gray-600 mb-1">
+                    Hours / week
+                  </label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.1"
+                    value={line.hours_per_week ?? ""}
+                    onChange={(e) =>
+                      setServiceLine(i, {
+                        hours_per_week:
+                          e.target.value === "" ? null : Number(e.target.value),
+                      })
+                    }
+                    className="input"
+                    placeholder="0.0"
+                  />
+                </div>
+                <div className="sm:col-span-2">
+                  <label className="block text-xs font-medium text-gray-600 mb-1">
+                    Session (min)
+                  </label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="5"
+                    value={line.session_duration_minutes ?? ""}
+                    onChange={(e) =>
+                      setServiceLine(i, {
+                        session_duration_minutes:
+                          e.target.value === "" ? null : Number(e.target.value),
+                      })
+                    }
+                    className="input"
+                    placeholder="60"
+                  />
+                </div>
+                <div className="sm:col-span-2">
+                  <label className="block text-xs font-medium text-gray-600 mb-1">
+                    Setting
+                  </label>
+                  <select
+                    value={line.setting}
+                    onChange={(e) =>
+                      setServiceLine(i, {
+                        setting: e.target.value as ServiceSetting | "",
+                      })
+                    }
+                    className="input"
+                  >
+                    <option value="">—</option>
+                    {SERVICE_SETTINGS.map((s) => (
+                      <option key={s} value={s}>
+                        {SETTING_LABELS[s]}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="sm:col-span-3">
+                  <label className="block text-xs font-medium text-gray-600 mb-1">
+                    Provider
+                  </label>
+                  <select
+                    value={line.provider_type}
+                    onChange={(e) =>
+                      setServiceLine(i, {
+                        provider_type: e.target.value as ProviderType | "",
+                      })
+                    }
+                    className="input"
+                  >
+                    <option value="">—</option>
+                    {PROVIDER_TYPES.map((p) => (
+                      <option key={p} value={p}>
+                        {p}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="sm:col-span-3 flex items-end justify-end">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      update({
+                        requested_services: form.requested_services.filter(
+                          (_, j) => j !== i,
+                        ),
+                      })
+                    }
+                    className="rounded-md px-3 py-2 text-sm font-medium text-red-600 hover:bg-red-50"
+                  >
+                    Remove line
+                  </button>
+                </div>
+              </div>
             </div>
           ))}
           <button
             type="button"
-            onClick={() =>
-              update({
-                requested_services: [
-                  ...form.requested_services,
-                  {
-                    service_name: "",
-                    cpt_code: "",
-                    frequency: "",
-                    duration: "",
-                    hours_per_week: undefined,
-                  },
-                ],
-              })
-            }
+            onClick={addServiceLine}
             className="text-sm text-indigo-600 hover:text-indigo-800 font-medium"
           >
-            + Add Service
+            + Add Service Line
           </button>
         </div>
       </fieldset>
 
       <fieldset>
-        <legend className="block text-sm font-medium text-gray-700 mb-2">
-          Therapy Schedule
+        <legend className="block text-sm font-medium text-gray-700 mb-1">
+          Weekly Therapy Schedule
         </legend>
+        <p className="text-xs text-gray-500 mb-3">
+          Total scheduled:{" "}
+          <span className="font-semibold text-gray-700">
+            {formatHours(totalScheduledHours)}
+          </span>{" "}
+          across {form.therapy_schedule.length}{" "}
+          {form.therapy_schedule.length === 1 ? "block" : "blocks"}.
+        </p>
         <div className="space-y-2">
-          {form.therapy_schedule.map((s, i) => (
-            <div key={i} className="flex flex-wrap gap-2 items-start">
-              <select
-                value={s.day}
-                onChange={(e) => {
-                  const n = [...form.therapy_schedule];
-                  n[i] = { ...n[i], day: e.target.value };
-                  update({ therapy_schedule: n });
-                }}
-                className="input w-32"
+          {form.therapy_schedule.map((entry, i) => {
+            const minutes = scheduleDurationMinutes(entry);
+            return (
+              <div
+                key={i}
+                className="grid grid-cols-2 gap-2 rounded-md border border-gray-200 bg-gray-50/60 p-3 sm:grid-cols-12"
               >
-                <option value="">— Day —</option>
-                {DAYS.map((d) => (
-                  <option key={d} value={d}>
-                    {d}
-                  </option>
-                ))}
-              </select>
-              <input
-                value={s.time}
-                onChange={(e) => {
-                  const n = [...form.therapy_schedule];
-                  n[i] = { ...n[i], time: e.target.value };
-                  update({ therapy_schedule: n });
-                }}
-                className="input w-32"
-                placeholder="Time (e.g. 9-11)"
-              />
-              <input
-                value={s.location}
-                onChange={(e) => {
-                  const n = [...form.therapy_schedule];
-                  n[i] = { ...n[i], location: e.target.value };
-                  update({ therapy_schedule: n });
-                }}
-                className="input w-28"
-                placeholder="Location"
-              />
-              <input
-                value={s.service_type}
-                onChange={(e) => {
-                  const n = [...form.therapy_schedule];
-                  n[i] = { ...n[i], service_type: e.target.value };
-                  update({ therapy_schedule: n });
-                }}
-                className="input w-36"
-                placeholder="Service type"
-              />
-              <button
-                type="button"
-                onClick={() =>
-                  update({
-                    therapy_schedule: form.therapy_schedule.filter(
-                      (_, j) => j !== i,
-                    ),
-                  })
-                }
-                className="p-2 text-red-400 hover:text-red-600 text-lg"
-                aria-label="Remove"
-              >
-                ×
-              </button>
-            </div>
-          ))}
+                <div className="sm:col-span-2">
+                  <label className="block text-xs font-medium text-gray-600 mb-1">
+                    Day
+                  </label>
+                  <select
+                    value={entry.day}
+                    onChange={(e) =>
+                      setScheduleEntry(i, { day: e.target.value })
+                    }
+                    className="input"
+                  >
+                    {entry.day === "" && <option value="">—</option>}
+                    {WEEK_DAYS.map((d) => (
+                      <option key={d} value={d}>
+                        {d}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="sm:col-span-2">
+                  <label className="block text-xs font-medium text-gray-600 mb-1">
+                    Start
+                  </label>
+                  <input
+                    type="time"
+                    value={entry.start_time}
+                    onChange={(e) =>
+                      setScheduleEntry(i, { start_time: e.target.value })
+                    }
+                    className="input"
+                  />
+                </div>
+                <div className="sm:col-span-2">
+                  <label className="block text-xs font-medium text-gray-600 mb-1">
+                    End
+                  </label>
+                  <input
+                    type="time"
+                    value={entry.end_time}
+                    onChange={(e) =>
+                      setScheduleEntry(i, { end_time: e.target.value })
+                    }
+                    className="input"
+                  />
+                </div>
+                <div className="sm:col-span-2">
+                  <label className="block text-xs font-medium text-gray-600 mb-1">
+                    Duration
+                  </label>
+                  <p className="input flex items-center bg-gray-100 text-gray-700">
+                    {formatDuration(minutes)}
+                  </p>
+                </div>
+                <div className="sm:col-span-2">
+                  <label className="block text-xs font-medium text-gray-600 mb-1">
+                    Service / CPT
+                  </label>
+                  <input
+                    value={entry.service}
+                    onChange={(e) =>
+                      setScheduleEntry(i, { service: e.target.value })
+                    }
+                    className="input"
+                    placeholder="97153"
+                  />
+                </div>
+                <div className="sm:col-span-2">
+                  <label className="block text-xs font-medium text-gray-600 mb-1">
+                    Setting
+                  </label>
+                  <select
+                    value={entry.setting}
+                    onChange={(e) =>
+                      setScheduleEntry(i, {
+                        setting: e.target.value as ServiceSetting | "",
+                      })
+                    }
+                    className="input"
+                  >
+                    <option value="">—</option>
+                    {SERVICE_SETTINGS.map((s) => (
+                      <option key={s} value={s}>
+                        {SETTING_LABELS[s]}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="sm:col-span-2">
+                  <label className="block text-xs font-medium text-gray-600 mb-1">
+                    Provider
+                  </label>
+                  <select
+                    value={entry.provider}
+                    onChange={(e) =>
+                      setScheduleEntry(i, { provider: e.target.value })
+                    }
+                    className="input"
+                  >
+                    <option value="">—</option>
+                    {PROVIDER_TYPES.map((p) => (
+                      <option key={p} value={p}>
+                        {p}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="col-span-2 flex items-end justify-end sm:col-span-12">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      update({
+                        therapy_schedule: form.therapy_schedule.filter(
+                          (_, j) => j !== i,
+                        ),
+                      })
+                    }
+                    className="rounded-md px-3 py-1.5 text-sm font-medium text-red-600 hover:bg-red-50"
+                  >
+                    Remove block
+                  </button>
+                </div>
+              </div>
+            );
+          })}
           <button
             type="button"
-            onClick={() =>
-              update({
-                therapy_schedule: [
-                  ...form.therapy_schedule,
-                  { day: "", time: "", location: "", service_type: "" },
-                ],
-              })
-            }
+            onClick={addScheduleEntry}
             className="text-sm text-indigo-600 hover:text-indigo-800 font-medium"
           >
-            + Add Schedule Entry
+            + Add Schedule Block
           </button>
         </div>
       </fieldset>
     </div>
   );
 
+  // ---- Authorization request: period, totals, medical necessity ----
+  const renderAuthorizationTab = () => (
+    <div className="space-y-8">
+      <fieldset>
+        <legend className="block text-sm font-medium text-gray-700 mb-1">
+          Authorization Period
+        </legend>
+        <p className="text-xs text-gray-500 mb-3">
+          The dates the payer is being asked to authorize services for.
+        </p>
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+          <Field label="Start date">
+            <input
+              type="date"
+              value={form.authorization_start_date}
+              onChange={(e) =>
+                update({ authorization_start_date: e.target.value })
+              }
+              className="input"
+            />
+          </Field>
+          <Field label="End date">
+            <input
+              type="date"
+              value={form.authorization_end_date}
+              onChange={(e) =>
+                update({ authorization_end_date: e.target.value })
+              }
+              className="input"
+            />
+          </Field>
+          <Field label="Authorization number (optional)">
+            <input
+              value={form.authorization_number}
+              onChange={(e) =>
+                update({ authorization_number: e.target.value })
+              }
+              className="input"
+              placeholder="Payer reference, if assigned"
+            />
+          </Field>
+        </div>
+        <p className="mt-3 text-sm text-gray-600">
+          {authWeeks != null
+            ? `Authorization period covers ${authWeeks} week${authWeeks === 1 ? "" : "s"} (${formatDateOnly(form.authorization_start_date)} – ${formatDateOnly(form.authorization_end_date)}).`
+            : "Enter both dates to see the length of the authorization period."}
+        </p>
+      </fieldset>
+
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+        <div className="rounded-lg border border-indigo-200 bg-indigo-50 p-4">
+          <p className="text-xs font-medium uppercase tracking-wide text-indigo-700">
+            Requested hours / week
+          </p>
+          <p className="mt-1 text-2xl font-bold text-indigo-800 tabular-nums">
+            {formatHours(totalRequestedHours)}
+          </p>
+        </div>
+        <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
+          <p className="text-xs font-medium uppercase tracking-wide text-gray-600">
+            Scheduled hours / week
+          </p>
+          <p className="mt-1 text-2xl font-bold text-gray-800 tabular-nums">
+            {formatHours(totalScheduledHours)}
+          </p>
+        </div>
+        <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
+          <p className="text-xs font-medium uppercase tracking-wide text-gray-600">
+            Service lines
+          </p>
+          <p className="mt-1 text-2xl font-bold text-gray-800 tabular-nums">
+            {form.requested_services.length}
+          </p>
+        </div>
+      </div>
+
+      <Field label="Clinical Justification / Medical Necessity">
+        <p className="text-xs text-gray-500 mb-2">
+          The narrative a reviewer reads first: why these services, at this
+          intensity, for this period. Reference the assessment results and the
+          risks of withholding treatment.
+        </p>
+        <textarea
+          value={form.clinical_justification}
+          onChange={(e) => update({ clinical_justification: e.target.value })}
+          rows={14}
+          className="input"
+          placeholder="This client presents with… The VB-MAPP assessment dated … indicates … Without the requested intensity of service, the client is at risk of …"
+        />
+      </Field>
+    </div>
+  );
   const renderReviewTab = () => (
     <div className="space-y-5">
       <div className="rounded-md bg-gray-50 p-4">
@@ -1305,10 +1642,17 @@ function TreatmentPlanEditPage() {
           </p>
           <p>
             <strong>Services:</strong> {form.requested_services.length}{" "}
-            requested
+            requested, {formatHours(totalRequestedHours)} total
           </p>
           <p>
-            <strong>Schedule entries:</strong> {form.therapy_schedule.length}
+            <strong>Schedule:</strong> {form.therapy_schedule.length} blocks,{" "}
+            {formatHours(totalScheduledHours)} scheduled
+          </p>
+          <p>
+            <strong>Authorization period:</strong>{" "}
+            {form.authorization_start_date || form.authorization_end_date
+              ? `${formatDateOnly(form.authorization_start_date)} – ${formatDateOnly(form.authorization_end_date)}`
+              : "—"}
           </p>
         </div>
       </div>
@@ -1461,6 +1805,7 @@ function TreatmentPlanEditPage() {
         {activeTab === "outcomes" && renderOutcomesTab()}
         {activeTab === "parent" && renderParentTab()}
         {activeTab === "services" && renderServicesTab()}
+        {activeTab === "authorization" && renderAuthorizationTab()}
         {activeTab === "review" && renderReviewTab()}
       </div>
 

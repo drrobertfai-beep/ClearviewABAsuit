@@ -12,6 +12,27 @@ import {
 } from "~/server/signatures";
 import { SignaturePad } from "~/components/SignaturePad";
 import { SignatureSection } from "~/components/SignatureSection";
+import {
+  formatDateOnly,
+  formatDuration,
+  formatHours,
+  normalizeSchedule,
+  normalizeServiceLines,
+  scheduleDurationMinutes,
+  scheduledHoursPerWeek,
+  sortSchedule,
+  totalHoursPerWeek,
+} from "~/lib/treatment-plan-authz";
+import type { ServiceSetting } from "~/lib/treatment-plan-authz";
+
+/** Display labels for the settings stored in the jsonb payload. */
+const SETTING_LABELS: Record<ServiceSetting, string> = {
+  home: "Home",
+  school: "School",
+  clinic: "Clinic",
+  community: "Community",
+  telehealth: "Telehealth",
+};
 
 function parseJsonField<T>(val: unknown, fallback: T): T {
   if (val == null) return fallback;
@@ -197,18 +218,12 @@ function TreatmentPlanDetailPage() {
   const coordGoals = parseJsonField<
     { provider: string; goal: string; method: string }[]
   >(plan.service_coordination_goals, []);
-  const services = parseJsonField<
-    {
-      service_name: string;
-      cpt_code: string;
-      frequency: string;
-      duration: string;
-      hours_per_week?: number;
-    }[]
-  >(plan.requested_services, []);
-  const schedule = parseJsonField<
-    { day: string; time: string; location: string; service_type: string }[]
-  >(plan.therapy_schedule, []);
+  // Both jsonb columns are read through the normalizers so a plan saved
+  // before the authorization fields existed renders exactly like a new one.
+  const services = normalizeServiceLines(plan.requested_services);
+  const schedule = sortSchedule(normalizeSchedule(plan.therapy_schedule));
+  const totalRequestedHours = totalHoursPerWeek(services);
+  const totalScheduledHours = scheduledHoursPerWeek(schedule);
 
   const canEdit = plan.status === "draft" || plan.status === "review";
 
@@ -618,45 +633,58 @@ function TreatmentPlanDetailPage() {
         {(services.length > 0 || schedule.length > 0) && (
           <Section title="7. Services & Schedule">
             {services.length > 0 && (
-              <div className="mb-3 overflow-x-auto">
-                <h4 className="text-xs font-semibold text-gray-500 uppercase mb-1">
-                  Requested Services
-                </h4>
+              <div className="mb-4 overflow-x-auto">
+                <div className="flex flex-wrap items-baseline justify-between gap-2 mb-1">
+                  <h4 className="text-xs font-semibold text-gray-500 uppercase">
+                    Requested Services
+                  </h4>
+                  <p className="text-sm font-semibold text-indigo-700">
+                    Total requested: {formatHours(totalRequestedHours)}
+                  </p>
+                </div>
                 <table className="min-w-full text-sm">
                   <thead>
                     <tr className="border-b">
                       <th className="text-left py-2 pr-3 text-xs font-semibold text-gray-500 uppercase">
-                        Service
-                      </th>
-                      <th className="text-left py-2 pr-3 text-xs font-semibold text-gray-500 uppercase">
                         CPT
                       </th>
                       <th className="text-left py-2 pr-3 text-xs font-semibold text-gray-500 uppercase">
-                        Frequency
+                        Service
                       </th>
                       <th className="text-left py-2 pr-3 text-xs font-semibold text-gray-500 uppercase">
-                        Duration
+                        Hrs/Wk
+                      </th>
+                      <th className="text-left py-2 pr-3 text-xs font-semibold text-gray-500 uppercase">
+                        Session
+                      </th>
+                      <th className="text-left py-2 pr-3 text-xs font-semibold text-gray-500 uppercase">
+                        Setting
                       </th>
                       <th className="text-left py-2 text-xs font-semibold text-gray-500 uppercase">
-                        Hrs/Wk
+                        Provider
                       </th>
                     </tr>
                   </thead>
                   <tbody>
                     {services.map((s, i) => (
                       <tr key={i} className="border-b last:border-0">
-                        <td className="py-2 pr-3">{s.service_name || "—"}</td>
-                        <td className="py-2 pr-3 text-gray-600">
+                        <td className="py-2 pr-3 font-medium text-gray-800">
                           {s.cpt_code || "—"}
                         </td>
-                        <td className="py-2 pr-3 text-gray-600">
-                          {s.frequency || "—"}
+                        <td className="py-2 pr-3">{s.service_name || "—"}</td>
+                        <td className="py-2 pr-3 text-gray-600 tabular-nums">
+                          {s.hours_per_week ?? "—"}
                         </td>
                         <td className="py-2 pr-3 text-gray-600">
-                          {s.duration || "—"}
+                          {s.session_duration_minutes
+                            ? formatDuration(s.session_duration_minutes)
+                            : "—"}
+                        </td>
+                        <td className="py-2 pr-3 text-gray-600">
+                          {s.setting ? SETTING_LABELS[s.setting] : "—"}
                         </td>
                         <td className="py-2 text-gray-600">
-                          {s.hours_per_week ?? "—"}
+                          {s.provider_type || "—"}
                         </td>
                       </tr>
                     ))}
@@ -666,9 +694,17 @@ function TreatmentPlanDetailPage() {
             )}
             {schedule.length > 0 && (
               <div className="overflow-x-auto">
-                <h4 className="text-xs font-semibold text-gray-500 uppercase mb-1">
-                  Therapy Schedule
-                </h4>
+                <div className="flex flex-wrap items-baseline justify-between gap-2 mb-1">
+                  <h4 className="text-xs font-semibold text-gray-500 uppercase">
+                    Therapy Schedule
+                  </h4>
+                  <p className="text-sm text-gray-600">
+                    Total scheduled:{" "}
+                    <span className="font-semibold text-gray-800">
+                      {formatHours(totalScheduledHours)}
+                    </span>
+                  </p>
+                </div>
                 <table className="min-w-full text-sm">
                   <thead>
                     <tr className="border-b">
@@ -676,13 +712,22 @@ function TreatmentPlanDetailPage() {
                         Day
                       </th>
                       <th className="text-left py-2 pr-3 text-xs font-semibold text-gray-500 uppercase">
-                        Time
+                        Start
                       </th>
                       <th className="text-left py-2 pr-3 text-xs font-semibold text-gray-500 uppercase">
-                        Location
+                        End
+                      </th>
+                      <th className="text-left py-2 pr-3 text-xs font-semibold text-gray-500 uppercase">
+                        Duration
+                      </th>
+                      <th className="text-left py-2 pr-3 text-xs font-semibold text-gray-500 uppercase">
+                        Service
+                      </th>
+                      <th className="text-left py-2 pr-3 text-xs font-semibold text-gray-500 uppercase">
+                        Setting
                       </th>
                       <th className="text-left py-2 text-xs font-semibold text-gray-500 uppercase">
-                        Service
+                        Provider
                       </th>
                     </tr>
                   </thead>
@@ -690,20 +735,77 @@ function TreatmentPlanDetailPage() {
                     {schedule.map((s, i) => (
                       <tr key={i} className="border-b last:border-0">
                         <td className="py-2 pr-3">{s.day || "—"}</td>
-                        <td className="py-2 pr-3 text-gray-600">
-                          {s.time || "—"}
+                        <td className="py-2 pr-3 text-gray-600 tabular-nums">
+                          {s.start_time || "—"}
+                        </td>
+                        <td className="py-2 pr-3 text-gray-600 tabular-nums">
+                          {s.end_time || "—"}
                         </td>
                         <td className="py-2 pr-3 text-gray-600">
-                          {s.location || "—"}
+                          {formatDuration(scheduleDurationMinutes(s))}
+                        </td>
+                        <td className="py-2 pr-3 text-gray-600">
+                          {s.service || "—"}
+                        </td>
+                        <td className="py-2 pr-3 text-gray-600">
+                          {s.setting ? SETTING_LABELS[s.setting] : "—"}
                         </td>
                         <td className="py-2 text-gray-600">
-                          {s.service_type || "—"}
+                          {s.provider || "—"}
                         </td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
               </div>
+            )}
+          </Section>
+        )}
+
+        {/* Section 8: Authorization Request */}
+        {(plan.authorization_start_date ||
+          plan.authorization_end_date ||
+          plan.authorization_number ||
+          plan.clinical_justification) && (
+          <Section title="8. Authorization Request">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-3 mb-4">
+              <div>
+                <p className="text-xs font-semibold text-gray-500 uppercase">
+                  Authorization period
+                </p>
+                <p className="text-sm text-gray-800">
+                  {formatDateOnly(plan.authorization_start_date)} –{" "}
+                  {formatDateOnly(plan.authorization_end_date)}
+                </p>
+              </div>
+              <div>
+                <p className="text-xs font-semibold text-gray-500 uppercase">
+                  Authorization number
+                </p>
+                <p className="text-sm text-gray-800">
+                  {plan.authorization_number || "Not yet assigned"}
+                </p>
+              </div>
+              <div>
+                <p className="text-xs font-semibold text-gray-500 uppercase">
+                  Requested hours / week
+                </p>
+                <p className="text-sm font-semibold text-indigo-700">
+                  {formatHours(totalRequestedHours)}
+                </p>
+              </div>
+            </div>
+            <h4 className="text-xs font-semibold text-gray-500 uppercase mb-1">
+              Clinical Justification / Medical Necessity
+            </h4>
+            {plan.clinical_justification ? (
+              <p className="text-sm text-gray-700 whitespace-pre-line leading-relaxed">
+                {plan.clinical_justification}
+              </p>
+            ) : (
+              <p className="text-sm text-gray-400">
+                No clinical justification recorded yet.
+              </p>
             )}
           </Section>
         )}

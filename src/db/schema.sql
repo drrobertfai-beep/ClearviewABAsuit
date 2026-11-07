@@ -173,6 +173,10 @@ CREATE TABLE IF NOT EXISTS treatment_plans (
     discharge_criteria TEXT,
     requested_services JSONB DEFAULT '[]'::jsonb,
     therapy_schedule JSONB DEFAULT '{}'::jsonb,
+    clinical_justification TEXT,
+    authorization_start_date DATE,
+    authorization_end_date DATE,
+    authorization_number TEXT,
     status TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft', 'review', 'approved', 'active', 'completed')),
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -181,6 +185,17 @@ CREATE TABLE IF NOT EXISTS treatment_plans (
 CREATE INDEX IF NOT EXISTS idx_treatment_plans_client_id ON treatment_plans (client_id);
 CREATE INDEX IF NOT EXISTS idx_treatment_plans_status ON treatment_plans (status);
 CREATE INDEX IF NOT EXISTS idx_treatment_plans_assessment_id ON treatment_plans (assessment_id);
+
+-- Authorization request fields. `requested_services` and `therapy_schedule`
+-- above already exist on every database; these four are new, so existing
+-- databases get them through idempotent ALTERs. The two jsonb columns keep
+-- their old shape for plans written before this change — the app normalizes
+-- both shapes on read (src/lib/treatment-plan-authz.ts) and writes the new
+-- shape, so no data migration is required or wanted.
+ALTER TABLE treatment_plans ADD COLUMN IF NOT EXISTS clinical_justification TEXT;
+ALTER TABLE treatment_plans ADD COLUMN IF NOT EXISTS authorization_start_date DATE;
+ALTER TABLE treatment_plans ADD COLUMN IF NOT EXISTS authorization_end_date DATE;
+ALTER TABLE treatment_plans ADD COLUMN IF NOT EXISTS authorization_number TEXT;
 
 -- ============================================================================
 -- SIGNATURES
