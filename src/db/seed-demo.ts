@@ -24,6 +24,12 @@ import { applySchema } from "./migrate";
 import { hashPassword, verifyPassword } from "~/server/password";
 import { computeVBMAPPScoring } from "../lib/vbmapp-scoring";
 import {
+  scheduledHoursPerWeek,
+  totalHoursPerWeek,
+  type ScheduleEntry,
+  type ServiceLine,
+} from "../lib/treatment-plan-authz";
+import {
   VB_MAPP_MILESTONES,
   VB_MAPP_BARRIERS,
   VB_MAPP_TRANSITION,
@@ -792,11 +798,16 @@ const PLANS = [
         provider_type: "Parent/Caregiver Training",
       },
     ],
+    // Must reconcile with requested_services above: 20h 97153 + 3h 97155
+    // + 0.5h 97156 = 23.5 hrs/week. `assertDemoHoursReconcile()` enforces it.
     therapy_schedule: [
       { day: "Monday", start_time: "09:00", end_time: "12:00", service: "97153", setting: "home", provider: "RBT" },
+      { day: "Monday", start_time: "13:00", end_time: "16:00", service: "97153", setting: "home", provider: "RBT" },
       { day: "Tuesday", start_time: "09:00", end_time: "12:00", service: "97153", setting: "clinic", provider: "RBT" },
+      { day: "Tuesday", start_time: "13:00", end_time: "15:00", service: "97153", setting: "clinic", provider: "RBT" },
+      { day: "Wednesday", start_time: "09:00", end_time: "12:00", service: "97155", setting: "clinic", provider: "BCBA" },
       { day: "Wednesday", start_time: "13:00", end_time: "16:00", service: "97153", setting: "home", provider: "RBT" },
-      { day: "Thursday", start_time: "09:00", end_time: "11:00", service: "97155", setting: "clinic", provider: "BCBA" },
+      { day: "Thursday", start_time: "09:00", end_time: "12:00", service: "97153", setting: "home", provider: "RBT" },
       { day: "Friday", start_time: "09:00", end_time: "12:00", service: "97153", setting: "home", provider: "RBT" },
       { day: "Friday", start_time: "13:00", end_time: "13:30", service: "97156", setting: "telehealth", provider: "Parent/Caregiver Training" },
     ],
@@ -921,12 +932,16 @@ const PLANS = [
         provider_type: "BCBA",
       },
     ],
+    // Must reconcile with requested_services above: 25h 97153 + 4h 97155
+    // = 29 hrs/week. `assertDemoHoursReconcile()` enforces it.
     therapy_schedule: [
-      { day: "Monday", start_time: "08:30", end_time: "12:30", service: "97153", setting: "clinic", provider: "RBT" },
-      { day: "Tuesday", start_time: "08:30", end_time: "12:30", service: "97153", setting: "clinic", provider: "RBT" },
-      { day: "Wednesday", start_time: "08:30", end_time: "12:30", service: "97153", setting: "clinic", provider: "RBT" },
-      { day: "Thursday", start_time: "08:30", end_time: "12:30", service: "97153", setting: "home", provider: "RBT" },
-      { day: "Friday", start_time: "08:30", end_time: "11:30", service: "97155", setting: "clinic", provider: "BCBA" },
+      { day: "Monday", start_time: "08:30", end_time: "13:30", service: "97153", setting: "clinic", provider: "RBT" },
+      { day: "Tuesday", start_time: "08:30", end_time: "13:30", service: "97153", setting: "clinic", provider: "RBT" },
+      { day: "Tuesday", start_time: "14:00", end_time: "16:00", service: "97155", setting: "clinic", provider: "BCBA" },
+      { day: "Wednesday", start_time: "08:30", end_time: "13:30", service: "97153", setting: "clinic", provider: "RBT" },
+      { day: "Thursday", start_time: "08:30", end_time: "13:30", service: "97153", setting: "home", provider: "RBT" },
+      { day: "Thursday", start_time: "14:00", end_time: "16:00", service: "97155", setting: "clinic", provider: "BCBA" },
+      { day: "Friday", start_time: "08:30", end_time: "13:30", service: "97153", setting: "clinic", provider: "RBT" },
     ],
   },
   {
@@ -1016,13 +1031,53 @@ const PLANS = [
         provider_type: "BCBA",
       },
     ],
+    // Must reconcile with requested_services above: 10h 97153 + 2h 97155
+    // = 12 hrs/week. `assertDemoHoursReconcile()` enforces it.
     therapy_schedule: [
       { day: "Monday", start_time: "15:30", end_time: "17:30", service: "97153", setting: "home", provider: "RBT" },
+      { day: "Tuesday", start_time: "15:30", end_time: "17:30", service: "97153", setting: "home", provider: "RBT" },
+      { day: "Wednesday", start_time: "13:00", end_time: "15:00", service: "97155", setting: "clinic", provider: "BCBA" },
       { day: "Wednesday", start_time: "15:30", end_time: "17:30", service: "97153", setting: "home", provider: "RBT" },
-      { day: "Friday", start_time: "15:30", end_time: "17:30", service: "97155", setting: "clinic", provider: "BCBA" },
+      { day: "Thursday", start_time: "15:30", end_time: "17:30", service: "97153", setting: "home", provider: "RBT" },
+      { day: "Friday", start_time: "15:30", end_time: "17:30", service: "97153", setting: "home", provider: "RBT" },
     ],
   },
 ];
+
+/**
+ * The requested service lines and the weekly schedule live in two separate
+ * columns, and a reviewer rejects a plan whose schedule does not cover every
+ * requested hour. Fail the seed loudly instead of shipping demo data that
+ * contradicts itself.
+ */
+function assertDemoHoursReconcile(): void {
+  const problems: string[] = [];
+  for (const plan of PLANS) {
+    const requested = totalHoursPerWeek(plan.requested_services as ServiceLine[]);
+    const scheduled = scheduledHoursPerWeek(plan.therapy_schedule as ScheduleEntry[]);
+    if (Math.abs(requested - scheduled) >= 0.1) {
+      problems.push(
+        `${plan.id}: requested ${requested} hrs/wk but the schedule covers ${scheduled} hrs/wk`,
+      );
+    }
+  }
+  if (problems.length > 0) {
+    throw new Error(
+      `Demo plan hours do not reconcile:\n  ${problems.join("\n  ")}`,
+    );
+  }
+}
+
+/** Requested vs scheduled weekly hours for every demo plan, for the log. */
+function demoHoursReport(): string[] {
+  return PLANS.map((plan) => {
+    const requested = totalHoursPerWeek(plan.requested_services as ServiceLine[]);
+    const scheduled = scheduledHoursPerWeek(plan.therapy_schedule as ScheduleEntry[]);
+    return `   ${plan.id}  requested=${requested}  scheduled=${scheduled}  ${
+      Math.abs(requested - scheduled) < 0.1 ? "✓" : "✗"
+    }`;
+  });
+}
 
 // ---------------------------------------------------------------------------
 // Deletion
@@ -1167,6 +1222,13 @@ async function seed() {
   const neon = sql();
 
   console.log("🌱 ClearView ABA Suite — demo practice seed\n");
+
+  // 0. Refuse to write demo plans whose requested hours and weekly schedule
+  //    disagree — a reviewer would reject that, and it makes the demo wrong.
+  assertDemoHoursReconcile();
+  console.log("✓ Demo plan hours reconcile (requested = scheduled):");
+  for (const line of demoHoursReport()) console.log(line);
+  console.log("");
 
   // 1. Schema (adds the is_demo marker columns on an existing database).
   const migration = await applySchema();
@@ -1506,6 +1568,9 @@ async function seed() {
   console.log(`   /assessments/${ASSESSMENT_IDS[0]}`);
   console.log(`   /assessments/${ASSESSMENT_IDS[0]}/vb-mapp`);
   console.log(`   /treatment-plans/${PLAN_IDS[0]}`);
+  console.log(
+    `   /treatment-plans/${PLAN_IDS[2]}/edit   (draft plan — the editor)`,
+  );
   console.log(
     "\n🧹 Remove the demo practice at any time: bun src/db/seed-demo.ts --remove",
   );

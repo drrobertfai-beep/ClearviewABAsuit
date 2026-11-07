@@ -6,7 +6,7 @@ import { getClientFn, updateClientFn } from "~/server/clients";
 import { ClientForm, type ClientFormData } from "~/components/ClientForm";
 import type { Client } from "~/db/types";
 
-export const Route = createFileRoute("/clients/$clientId/edit")({
+export const Route = createFileRoute("/clients_/$clientId/edit")({
   component: EditClientPage,
   loader: async ({ params }) => {
     try {
@@ -53,7 +53,7 @@ function clientToFormData(client: Client): ClientFormData {
 
 function EditClientPage() {
   const client = Route.useLoaderData() as Client;
-  const params = useParams({ from: "/clients/$clientId/edit" });
+  const params = useParams({ from: "/clients_/$clientId/edit" });
   const navigate = useNavigate();
   const [data, setData] = useState<ClientFormData>(() => clientToFormData(client));
   const [errors, setErrors] = useState<Partial<Record<keyof ClientFormData | "form", string>>>({});
