@@ -14,7 +14,9 @@ import {
   deleteClient,
 } from "~/db";
 import type { ClientInput, ClientStatus } from "~/db";
-import { requireSession } from "~/server/auth-guard";
+import { analyzeClientImport, commitClientImport } from "~/db/import";
+import { sanitizeImportRows } from "~/lib/client-import";
+import { requirePracticeRole, requireSession } from "~/server/auth-guard";
 
 // ---------------------------------------------------------------------------
 // List clients (with optional status filter)
@@ -74,4 +76,78 @@ export const deleteClientFn = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     const { practiceId, user } = await requireSession();
     return deleteClient(practiceId, data.id, user.email);
+  });
+
+// ---------------------------------------------------------------------------
+// CSV import
+//
+// Two server functions over the same analysis:
+//   previewClientImportFn — validates + flags duplicates, writes nothing.
+//   importClientsFn       — re-validates and commits the valid, non-duplicate
+//                           rows, with one summary audit entry.
+//
+// The practice always comes from the session; the request body can only ever
+// describe rows, never say where they go. Row-level validation runs again on
+// the server so a tampered request cannot insert an unvalidated client.
+// ---------------------------------------------------------------------------
+export const previewClientImportFn = createServerFn({ method: "POST" })
+  .validator((d: unknown) => d as { rows?: unknown })
+  .handler(async ({ data }) => {
+    const { practiceId } = await requireSession();
+    const { rows, error } = sanitizeImportRows(data?.rows);
+    if (error) return { ok: false as const, error };
+
+    const { analysis } = await analyzeClientImport(practiceId, rows);
+    return {
+      ok: true as const,
+      analysis: {
+        totalRows: analysis.totalRows,
+        validRows: analysis.validRows,
+        invalid: analysis.invalid,
+        duplicates: analysis.duplicates,
+        importable: analysis.importable,
+      },
+    };
+  });
+
+export const importClientsFn = createServerFn({ method: "POST" })
+  .validator(
+    (d: unknown) =>
+      d as {
+        rows?: unknown;
+        fileName?: unknown;
+        skipDuplicates?: unknown;
+      },
+  )
+  .handler(async ({ data }) => {
+    const { practiceId, user } = await requirePracticeRole([
+      "owner",
+      "admin",
+      "clinician",
+    ]);
+
+    const { rows, error } = sanitizeImportRows(data?.rows);
+    if (error) return { ok: false as const, error };
+
+    const fileName =
+      typeof data?.fileName === "string" && data.fileName.trim()
+        ? data.fileName.trim().slice(0, 200)
+        : "clients.csv";
+    // Default ON: an accidental second import of the same file must not create
+    // a second copy of the caseload.
+    const skipDuplicates = data?.skipDuplicates !== false;
+
+    const result = await commitClientImport(practiceId, rows, {
+      fileName,
+      skipDuplicates,
+      changedBy: user.email,
+    });
+
+    return {
+      ok: true as const,
+      imported: result.imported,
+      totalRows: result.totalRows,
+      skippedDuplicates: result.skippedDuplicates,
+      failed: result.failed,
+    };
   });
