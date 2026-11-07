@@ -759,60 +759,46 @@ const PLANS = [
     ],
     discharge_criteria:
       "DEMO DATA. Discharge will be considered when the client independently requests needs across settings, problem behavior occurs no more than once per week and is managed by caregivers, and the client participates in the general education classroom with fading 1:1 support for 80% of the day.",
+    clinical_justification:
+      "DEMO DATA. This client meets medical necessity criteria for comprehensive applied behavior analysis. The VB-MAPP assessment documents delays across requesting, listener responding and social domains alongside barriers that maintain prompt dependency and limit independent communication. Problem behavior occurs daily and interferes with family routines and community participation. Twenty hours per week of direct intervention, supervised at three hours per week by a BCBA, is the least intensive dose expected to produce meaningful skill acquisition; the plan will step down as goals are met.",
+    authorization_start_date: isoDaysAgo(45),
+    authorization_end_date: isoDaysAgo(-135),
+    authorization_number: "DEMO-AUTH-100241",
     requested_services: [
       {
-        service_name: "Direct 1:1 ABA Therapy",
         cpt_code: "97153",
-        frequency: "20 hours/week",
-        duration: "6 months initial authorization",
+        service_name: "Adaptive behavior treatment by protocol (direct 1:1)",
         hours_per_week: 20,
+        session_duration_minutes: 180,
+        setting: "home",
+        provider_type: "RBT",
       },
       {
-        service_name: "BCBA Supervision",
         cpt_code: "97155",
-        frequency: "3 hours/week",
-        duration: "6 months initial authorization",
+        service_name:
+          "Adaptive behavior treatment with protocol modification (BCBA supervision)",
         hours_per_week: 3,
+        session_duration_minutes: 120,
+        setting: "clinic",
+        provider_type: "BCBA",
       },
       {
-        service_name: "Caregiver Training",
         cpt_code: "97156",
-        frequency: "2 hours/month",
-        duration: "6 months initial authorization",
+        service_name:
+          "Family adaptive behavior treatment guidance (caregiver training)",
         hours_per_week: 0.5,
+        session_duration_minutes: 60,
+        setting: "telehealth",
+        provider_type: "Parent/Caregiver Training",
       },
     ],
     therapy_schedule: [
-      {
-        day: "Monday",
-        time: "9:00 AM – 12:00 PM",
-        location: "Home",
-        service_type: "Direct 1:1",
-      },
-      {
-        day: "Tuesday",
-        time: "9:00 AM – 12:00 PM",
-        location: "Clinic",
-        service_type: "Direct 1:1",
-      },
-      {
-        day: "Wednesday",
-        time: "1:00 PM – 4:00 PM",
-        location: "Home",
-        service_type: "Direct 1:1",
-      },
-      {
-        day: "Thursday",
-        time: "9:00 AM – 11:00 AM",
-        location: "Clinic",
-        service_type: "BCBA Supervision",
-      },
-      {
-        day: "Friday",
-        time: "9:00 AM – 12:00 PM",
-        location: "Home",
-        service_type: "Direct 1:1",
-      },
+      { day: "Monday", start_time: "09:00", end_time: "12:00", service: "97153", setting: "home", provider: "RBT" },
+      { day: "Tuesday", start_time: "09:00", end_time: "12:00", service: "97153", setting: "clinic", provider: "RBT" },
+      { day: "Wednesday", start_time: "13:00", end_time: "16:00", service: "97153", setting: "home", provider: "RBT" },
+      { day: "Thursday", start_time: "09:00", end_time: "11:00", service: "97155", setting: "clinic", provider: "BCBA" },
+      { day: "Friday", start_time: "09:00", end_time: "12:00", service: "97153", setting: "home", provider: "RBT" },
+      { day: "Friday", start_time: "13:00", end_time: "13:30", service: "97156", setting: "telehealth", provider: "Parent/Caregiver Training" },
     ],
   },
   {
@@ -911,53 +897,36 @@ const PLANS = [
     ],
     discharge_criteria:
       "DEMO DATA. Discharge will be considered when the client requests needs independently across settings, problem behavior is below one episode per week, and play and listener skills are age-appropriate.",
+    clinical_justification:
+      "DEMO DATA. Early intensive behavioral intervention is medically necessary for this client. The VB-MAPP places milestones predominantly in Level 1 with emerging Level 2 requesting, and the barriers assessment identifies absent intraverbal, social and conditional discrimination repertoires. Without 25 hours per week of protocol-driven treatment the client is unlikely to acquire functional communication before school entry, and escape-maintained problem behavior is expected to increase. BCBA supervision at four hours per week is required to adjust protocols and to train caregivers.",
+    authorization_start_date: isoDaysAgo(20),
+    authorization_end_date: isoDaysAgo(-160),
+    authorization_number: "",
     requested_services: [
       {
-        service_name: "Direct 1:1 ABA Therapy",
         cpt_code: "97153",
-        frequency: "25 hours/week",
-        duration: "6 months initial authorization",
+        service_name: "Adaptive behavior treatment by protocol (direct 1:1)",
         hours_per_week: 25,
+        session_duration_minutes: 240,
+        setting: "clinic",
+        provider_type: "RBT",
       },
       {
-        service_name: "BCBA Supervision",
         cpt_code: "97155",
-        frequency: "4 hours/week",
-        duration: "6 months initial authorization",
+        service_name:
+          "Adaptive behavior treatment with protocol modification (BCBA supervision)",
         hours_per_week: 4,
+        session_duration_minutes: 120,
+        setting: "clinic",
+        provider_type: "BCBA",
       },
     ],
     therapy_schedule: [
-      {
-        day: "Monday",
-        time: "8:30 AM – 12:30 PM",
-        location: "Clinic",
-        service_type: "Direct 1:1",
-      },
-      {
-        day: "Tuesday",
-        time: "8:30 AM – 12:30 PM",
-        location: "Clinic",
-        service_type: "Direct 1:1",
-      },
-      {
-        day: "Wednesday",
-        time: "8:30 AM – 12:30 PM",
-        location: "Clinic",
-        service_type: "Direct 1:1",
-      },
-      {
-        day: "Thursday",
-        time: "8:30 AM – 12:30 PM",
-        location: "Home",
-        service_type: "Direct 1:1",
-      },
-      {
-        day: "Friday",
-        time: "8:30 AM – 11:30 AM",
-        location: "Clinic",
-        service_type: "BCBA Supervision",
-      },
+      { day: "Monday", start_time: "08:30", end_time: "12:30", service: "97153", setting: "clinic", provider: "RBT" },
+      { day: "Tuesday", start_time: "08:30", end_time: "12:30", service: "97153", setting: "clinic", provider: "RBT" },
+      { day: "Wednesday", start_time: "08:30", end_time: "12:30", service: "97153", setting: "clinic", provider: "RBT" },
+      { day: "Thursday", start_time: "08:30", end_time: "12:30", service: "97153", setting: "home", provider: "RBT" },
+      { day: "Friday", start_time: "08:30", end_time: "11:30", service: "97155", setting: "clinic", provider: "BCBA" },
     ],
   },
   {
@@ -1023,41 +992,34 @@ const PLANS = [
     service_coordination_goals: [],
     discharge_criteria:
       "DEMO DATA. Discharge will be considered when adaptive and academic goals are met and problem behavior is managed by school staff without behavior-analytic support.",
+    clinical_justification:
+      "DEMO DATA. Re-authorization request drafted after a family relocation. The client has made measurable progress in requesting and independent play but continues to need focused service to maintain those gains and to address remaining listener responding and social deficits. Ten hours per week of direct treatment with two hours per week of BCBA supervision is requested for a further six months, after which the plan will be reviewed for fade to a school-based model.",
+    authorization_start_date: isoDaysAgo(-14),
+    authorization_end_date: isoDaysAgo(-196),
+    authorization_number: "",
     requested_services: [
       {
-        service_name: "Direct 1:1 ABA Therapy",
         cpt_code: "97153",
-        frequency: "10 hours/week",
-        duration: "6 months",
+        service_name: "Adaptive behavior treatment by protocol (direct 1:1)",
         hours_per_week: 10,
+        session_duration_minutes: 120,
+        setting: "home",
+        provider_type: "RBT",
       },
       {
-        service_name: "BCBA Supervision",
         cpt_code: "97155",
-        frequency: "2 hours/week",
-        duration: "6 months",
+        service_name:
+          "Adaptive behavior treatment with protocol modification (BCBA supervision)",
         hours_per_week: 2,
+        session_duration_minutes: 120,
+        setting: "clinic",
+        provider_type: "BCBA",
       },
     ],
     therapy_schedule: [
-      {
-        day: "Monday",
-        time: "3:30 PM – 5:30 PM",
-        location: "Home",
-        service_type: "Direct 1:1",
-      },
-      {
-        day: "Wednesday",
-        time: "3:30 PM – 5:30 PM",
-        location: "Home",
-        service_type: "Direct 1:1",
-      },
-      {
-        day: "Friday",
-        time: "3:30 PM – 5:30 PM",
-        location: "Clinic",
-        service_type: "BCBA Supervision",
-      },
+      { day: "Monday", start_time: "15:30", end_time: "17:30", service: "97153", setting: "home", provider: "RBT" },
+      { day: "Wednesday", start_time: "15:30", end_time: "17:30", service: "97153", setting: "home", provider: "RBT" },
+      { day: "Friday", start_time: "15:30", end_time: "17:30", service: "97155", setting: "clinic", provider: "BCBA" },
     ],
   },
 ];
@@ -1363,11 +1325,14 @@ async function seed() {
          treatment_history, concurrent_services, family_history, school_info,
          maladaptive_behaviors, behavior_intervention_plan, skill_acquisition_goals,
          assessment_outcomes, parent_training_goals, service_coordination_goals,
-         discharge_criteria, requested_services, therapy_schedule, status,
+         discharge_criteria, requested_services, therapy_schedule,
+         clinical_justification, authorization_start_date,
+         authorization_end_date, authorization_number, status,
          created_at, updated_at, is_demo
        ) VALUES (
          $1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9, $10::jsonb, $11, $12::jsonb,
-         $13, $14::jsonb, $15::jsonb, $16, $17::jsonb, $18::jsonb, $19, $20, $20, TRUE
+         $13, $14::jsonb, $15::jsonb, $16, $17::jsonb, $18::jsonb,
+         $19, $20::date, $21::date, $22, $23, $24, $24, TRUE
        )`,
       [
         p.id,
@@ -1388,6 +1353,10 @@ async function seed() {
         p.discharge_criteria,
         JSON.stringify(p.requested_services),
         JSON.stringify(p.therapy_schedule),
+        p.clinical_justification,
+        p.authorization_start_date || null,
+        p.authorization_end_date || null,
+        p.authorization_number || null,
         p.status,
         p.created,
       ],

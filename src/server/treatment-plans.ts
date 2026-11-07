@@ -23,6 +23,35 @@ import type {
   Assessment,
 } from "~/db/types";
 import { requireSession } from "~/server/auth-guard";
+import {
+  normalizeSchedule,
+  normalizeServiceLines,
+} from "~/lib/treatment-plan-authz";
+
+/**
+ * Plans written before the authorization fields existed hold the legacy jsonb
+ * shapes for services and schedule. Normalizing on write means every save
+ * migrates a plan to the current shape, so old and new rows converge without a
+ * data migration.
+ */
+function normalizeAuthorizationFields(
+  data: Partial<Omit<TreatmentPlan, "id" | "created_at" | "updated_at">>,
+): Partial<Omit<TreatmentPlan, "id" | "created_at" | "updated_at">> {
+  const next = { ...data };
+  if ("requested_services" in next) {
+    next.requested_services = normalizeServiceLines(next.requested_services);
+  }
+  if ("therapy_schedule" in next) {
+    next.therapy_schedule = normalizeSchedule(next.therapy_schedule);
+  }
+  for (const key of ["authorization_start_date", "authorization_end_date"] as const) {
+    if (key in next) {
+      const value = next[key];
+      next[key] = typeof value === "string" && value.trim() ? value.slice(0, 10) : null;
+    }
+  }
+  return next;
+}
 
 // ---------------------------------------------------------------------------
 // List treatment plans (with optional filters)
@@ -97,6 +126,10 @@ export const createTreatmentPlanFn = createServerFn({ method: "POST" })
         discharge_criteria: null,
         requested_services: [],
         therapy_schedule: [],
+        clinical_justification: null,
+        authorization_start_date: null,
+        authorization_end_date: null,
+        authorization_number: null,
         status: "draft",
       },
       user.email,
@@ -117,7 +150,12 @@ export const updateTreatmentPlanFn = createServerFn({ method: "POST" })
   )
   .handler(async ({ data }) => {
     const { practiceId, user } = await requireSession();
-    return updateTreatmentPlan(practiceId, data.id, data.data, user.email);
+    return updateTreatmentPlan(
+      practiceId,
+      data.id,
+      normalizeAuthorizationFields(data.data),
+      user.email,
+    );
   });
 
 // ---------------------------------------------------------------------------

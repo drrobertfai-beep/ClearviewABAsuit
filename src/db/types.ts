@@ -89,8 +89,26 @@ export interface TreatmentPlan {
   parent_training_goals: unknown;
   service_coordination_goals: unknown;
   discharge_criteria: string | null;
+  /**
+   * Service lines requested from the payer. Always read through
+   * `normalizeServiceLines()` — older plans hold the legacy shape
+   * ({ service_name, cpt_code, frequency, duration }) in this column.
+   */
   requested_services: unknown;
+  /**
+   * Weekly therapy grid. Always read through `normalizeSchedule()` — older
+   * plans hold { day, time, location, service_type } rows, and the column
+   * default is `{}` rather than an array.
+   */
   therapy_schedule: unknown;
+  /** Medical-necessity narrative submitted with the authorization request. */
+  clinical_justification: string | null;
+  /** DATE (YYYY-MM-DD) or null. */
+  authorization_start_date: string | null;
+  /** DATE (YYYY-MM-DD) or null. */
+  authorization_end_date: string | null;
+  /** Payer-assigned authorization / reference number. */
+  authorization_number: string | null;
   status: TreatmentPlanStatus;
   /** TRUE for rows created by the demo seed script. */
   is_demo?: boolean;
