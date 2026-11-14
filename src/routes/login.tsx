@@ -3,11 +3,17 @@ import { useState } from "react";
 import { loginFn } from "~/server/auth";
 
 export const Route = createFileRoute("/login")({
+  // `invite` carries an invite token through sign-in so /invite/<token> can
+  // finish the join straight after a successful login.
+  validateSearch: (search: Record<string, unknown>): { invite?: string } => ({
+    invite: typeof search.invite === "string" ? search.invite : undefined,
+  }),
   component: LoginPage,
 });
 
 function LoginPage() {
   const router = useRouter();
+  const search = Route.useSearch();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [rememberMe, setRememberMe] = useState(false);
@@ -21,6 +27,14 @@ function LoginPage() {
 
     try {
       await loginFn({ data: { email, password } });
+      if (search.invite) {
+        await router.invalidate();
+        await router.navigate({
+          to: "/invite/$token",
+          params: { token: search.invite },
+        });
+        return;
+      }
       router.navigate({ to: "/" });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Login failed. Please try again.");

@@ -15,7 +15,7 @@ import {
 } from "~/db";
 import type { Assessment, AssessmentStatus } from "~/db/types";
 import { computeVBMAPPScoring } from "~/lib/vbmapp-scoring";
-import { requireSession } from "~/server/auth-guard";
+import { requirePracticeRole, requireSession } from "~/server/auth-guard";
 
 // ---------------------------------------------------------------------------
 // List assessments (with optional filters)
@@ -70,7 +70,11 @@ export const createAssessmentFn = createServerFn({ method: "POST" })
       },
   )
   .handler(async ({ data }) => {
-    const { practiceId, user } = await requireSession();
+    const { practiceId, user } = await requirePracticeRole([
+      "owner",
+      "admin",
+      "clinician",
+    ]);
     const assessment = await createAssessment(
       practiceId,
       {
@@ -105,7 +109,11 @@ export const updateAssessmentFn = createServerFn({ method: "POST" })
       },
   )
   .handler(async ({ data }) => {
-    const { practiceId, user } = await requireSession();
+    const { practiceId, user } = await requirePracticeRole([
+      "owner",
+      "admin",
+      "clinician",
+    ]);
     const patch: Record<string, unknown> = {};
 
     if (data.data.raw_scores !== undefined) {
@@ -138,6 +146,10 @@ export const updateAssessmentFn = createServerFn({ method: "POST" })
 export const deleteAssessmentFn = createServerFn({ method: "POST" })
   .validator((d: unknown) => d as { id: string })
   .handler(async ({ data }) => {
-    const { practiceId, user } = await requireSession();
+    const { practiceId, user } = await requirePracticeRole([
+      "owner",
+      "admin",
+      "clinician",
+    ]);
     return deleteAssessment(practiceId, data.id, user.email);
   });

@@ -6,7 +6,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { getSignatures, addSignature, getSignaturesByRole } from "~/db";
 import { updateTreatmentPlan } from "~/db";
-import { requireSession } from "~/server/auth-guard";
+import { requirePracticeRole, requireSession } from "~/server/auth-guard";
 
 export const addSignatureFn = createServerFn({ method: "POST" })
   .validator(
@@ -20,7 +20,11 @@ export const addSignatureFn = createServerFn({ method: "POST" })
       },
   )
   .handler(async ({ data }) => {
-    const { practiceId } = await requireSession();
+    const { practiceId } = await requirePracticeRole([
+      "owner",
+      "admin",
+      "clinician",
+    ]);
     const sig = await addSignature(
       practiceId,
       {

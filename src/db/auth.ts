@@ -146,7 +146,9 @@ export async function getSessionByToken(token: string): Promise<SessionWithUser 
       SELECT pm.practice_id, pm.role
       FROM practice_members pm
       WHERE pm.user_id = u.id AND pm.status = 'active'
-      ORDER BY pm.joined_at ASC
+      -- Most recently joined active membership wins (see getActiveMembership
+      -- in src/db/practices.ts). Accepting an invite makes that practice active.
+      ORDER BY pm.joined_at DESC
       LIMIT 1
     ) pm ON TRUE
     LEFT JOIN practices p ON p.id = pm.practice_id

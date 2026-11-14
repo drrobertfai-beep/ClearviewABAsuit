@@ -29,9 +29,14 @@ function toIso(value: unknown): string {
  * Resolve the practice a user is currently acting in.
  *
  * This is THE tenancy lookup: it runs server-side from the session cookie on
- * every request. Phase 2 adds a practice switcher; until then a user's active
- * practice is their earliest active membership (their own practice, for every
- * account created today).
+ * every request.
+ *
+ * Which practice wins when an account belongs to more than one: the MOST
+ * RECENTLY JOINED active membership (phase 2 — joining a practice by accepting
+ * an invite makes that practice the one you land in). A user who is removed
+ * from a practice they joined falls back to their next most recent active
+ * membership, normally the practice created at their own signup. There is no
+ * practice switcher yet; this ordering is the whole rule.
  */
 export async function getActiveMembership(
   userId: string,
@@ -41,7 +46,7 @@ export async function getActiveMembership(
     FROM practice_members pm
     JOIN practices p ON p.id = pm.practice_id
     WHERE pm.user_id = ${userId} AND pm.status = 'active'
-    ORDER BY pm.joined_at ASC, p.created_at ASC
+    ORDER BY pm.joined_at DESC, p.created_at DESC
     LIMIT 1
   `;
   if (rows.length === 0) return null;
@@ -63,7 +68,7 @@ export async function listPracticesForUser(
     FROM practice_members pm
     JOIN practices p ON p.id = pm.practice_id
     WHERE pm.user_id = ${userId} AND pm.status = 'active'
-    ORDER BY pm.joined_at ASC
+    ORDER BY pm.joined_at DESC
   `;
   return rows.map((r) => ({
     practiceId: String(r.id),

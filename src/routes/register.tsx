@@ -1,9 +1,14 @@
 import { createFileRoute, Link, useRouter } from "@tanstack/react-router";
 import { useState } from "react";
 import { registerFn } from "~/server/auth";
-import { PLANS } from "~/lib/plans";
+import { PLANS, clientLimitLabel, seatsLabel } from "~/lib/plans";
 
 export const Route = createFileRoute("/register")({
+  // `invite` carries an invite token through signup so /invite/<token> can
+  // finish the join straight after the account is created.
+  validateSearch: (search: Record<string, unknown>): { invite?: string } => ({
+    invite: typeof search.invite === "string" ? search.invite : undefined,
+  }),
   component: RegisterPage,
 });
 
@@ -16,6 +21,7 @@ const ROLE_OPTIONS = [
 
 function RegisterPage() {
   const router = useRouter();
+  const search = Route.useSearch();
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -39,6 +45,14 @@ function RegisterPage() {
 
     try {
       await registerFn({ data: { name, email, password, role, plan: selectedPlan } });
+      if (search.invite) {
+        await router.invalidate();
+        await router.navigate({
+          to: "/invite/$token",
+          params: { token: search.invite },
+        });
+        return;
+      }
       router.navigate({ to: "/" });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Registration failed. Please try again.");
@@ -247,13 +261,13 @@ function RegisterPage() {
                       <svg className="h-4 w-4 flex-shrink-0 text-indigo-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
                         <path strokeLinecap="round" strokeLinejoin="round" d="m4.5 12.75 6 6 9-13.5" />
                       </svg>
-                      {plan.clientLimit}
+                      {clientLimitLabel(plan.clientLimit)}
                     </li>
                     <li className="flex items-center gap-1.5 text-sm font-medium text-gray-700">
                       <svg className="h-4 w-4 flex-shrink-0 text-indigo-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
                         <path strokeLinecap="round" strokeLinejoin="round" d="m4.5 12.75 6 6 9-13.5" />
                       </svg>
-                      {plan.seats}
+                      {seatsLabel(plan.seats)}
                     </li>
                     {plan.features.map((f) => (
                       <li key={f} className="flex items-center gap-1.5 text-sm text-gray-500">
