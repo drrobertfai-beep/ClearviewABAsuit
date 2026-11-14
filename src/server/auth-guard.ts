@@ -7,6 +7,7 @@
 
 import { getCookie } from "@tanstack/react-start/server";
 import { getSessionByToken } from "~/db/auth";
+import { getBillingStatus } from "~/db/billing";
 import { toSafeUser } from "~/server/safe-user";
 import type { SafeUser } from "~/server/safe-user";
 import type { PracticeRole } from "~/db/types";
@@ -53,6 +54,27 @@ export async function requireSession(): Promise<RequestContext> {
 }
 
 /**
+ * Refuse a WRITE when the practice is read-only.
+ *
+ * Cancelling a subscription (customer.subscription.deleted) puts the practice in
+ * the read-only state: everything it holds stays, but nothing changes until it is
+ * reactivated. Reads are never blocked, so a cancelled practice can still see and
+ * export its own data.
+ *
+ * Called from the permission guards below, which every mutating server function
+ * goes through — a client that ignores the disabled buttons still gets refused
+ * here, server-side.
+ */
+export async function assertPracticeWritable(practiceId: string): Promise<void> {
+  const status = await getBillingStatus(practiceId);
+  if (status === "cancelled") {
+    throw new Error(
+      "This practice is read-only because its subscription was cancelled. Nothing has been deleted — reactivate on the Billing page to make changes.",
+    );
+  }
+}
+
+/**
  * Require one of the given practice permission levels (owner/admin/clinician/
  * viewer). Distinct from the clinical credential on `users.role`.
  */
@@ -63,6 +85,7 @@ export async function requirePracticeRole(
   if (!allowedRoles.includes(ctx.practiceRole)) {
     throw new Error("You do not have permission to perform this action.");
   }
+  await assertPracticeWritable(ctx.practiceId);
   return ctx;
 }
 
@@ -77,5 +100,6 @@ export async function requireRole(allowedRoles: string[]): Promise<RequestContex
   if (!allowedRoles.includes(ctx.user.role)) {
     throw new Error("You do not have permission to perform this action.");
   }
+  await assertPracticeWritable(ctx.practiceId);
   return ctx;
 }

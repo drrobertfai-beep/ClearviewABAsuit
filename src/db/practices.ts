@@ -10,6 +10,7 @@
 import { sql } from "./sql";
 import type {
   PlanTier,
+  PracticeBillingStatus,
   PracticeContext,
   PracticeRole,
   User,
@@ -56,7 +57,7 @@ export async function getActiveMembership(
       : null;
 
   const rows = await sql()`
-    SELECT p.id, p.name, p.plan, pm.role
+    SELECT p.id, p.name, p.plan, p.billing_status, pm.role
     FROM practice_members pm
     JOIN practices p ON p.id = pm.practice_id
     WHERE pm.user_id = ${userId} AND pm.status = 'active'
@@ -75,6 +76,7 @@ export async function getActiveMembership(
     practiceRole: r.role as PracticeRole,
     practiceName: String(r.name),
     practicePlan: r.plan as PlanTier,
+    practiceBillingStatus: (r.billing_status ?? "active") as PracticeBillingStatus,
   };
 }
 
@@ -83,7 +85,7 @@ export async function listPracticesForUser(
   userId: string,
 ): Promise<(PracticeContext & { joinedAt: string })[]> {
   const rows = await sql()`
-    SELECT p.id, p.name, p.plan, pm.role, pm.joined_at
+    SELECT p.id, p.name, p.plan, p.billing_status, pm.role, pm.joined_at
     FROM practice_members pm
     JOIN practices p ON p.id = pm.practice_id
     WHERE pm.user_id = ${userId} AND pm.status = 'active'
@@ -94,6 +96,7 @@ export async function listPracticesForUser(
     practiceRole: r.role as PracticeRole,
     practiceName: String(r.name),
     practicePlan: r.plan as PlanTier,
+    practiceBillingStatus: (r.billing_status ?? "active") as PracticeBillingStatus,
     joinedAt: toIso(r.joined_at),
   }));
 }

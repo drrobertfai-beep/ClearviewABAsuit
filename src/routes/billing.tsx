@@ -50,6 +50,20 @@ const PLAN_FEATURE_CHECK = (
   </svg>
 );
 
+/**
+ * A plan's Stripe Payment Link with the buying practice attached.
+ *
+ * `client_reference_id` is how POST /api/stripe/webhook knows WHICH practice
+ * paid — without it a checkout cannot activate an account. Signed-out visitors
+ * have no practice, so they get the bare link (the webhook logs and ignores
+ * their event rather than guessing).
+ */
+function checkoutHref(link: string, practiceId: string | null): string {
+  if (!practiceId) return link;
+  const separator = link.includes("?") ? "&" : "?";
+  return `${link}${separator}client_reference_id=${encodeURIComponent(practiceId)}`;
+}
+
 function BillingPage() {
   const ctx = Route.useRouteContext();
   const search = Route.useSearch();
@@ -61,7 +75,17 @@ function BillingPage() {
     name?: string;
     /** Practice this session is billing for — shown so the reader knows where they are. */
     practiceName?: string | null;
+    /** The practice a checkout must activate (sent to Stripe as client_reference_id). */
+    practiceId?: string | null;
+    /** Set by the Stripe webhook: active | past_due | cancelled. */
+    billingStatus?: string | null;
   } | null;
+
+  // Which practice a checkout buys for. Signed-out visitors have none: they get
+  // the bare Payment Link and the webhook ignores their event rather than
+  // guessing an account.
+  const checkoutPracticeId =
+    user?.practiceId ?? ((ctx.activePracticeId ?? null) as string | null);
 
   const currentPlan = user?.plan ?? "trial";
   const currentPlanDef = getPlan(currentPlan);
@@ -70,7 +94,15 @@ function BillingPage() {
   // `account_status` only tells us whether the owner has finished activating a
   // paid plan yet (activation is manual today).
   const onTrial = currentPlan === "trial";
-  const activationPending = !onTrial && user?.account_status !== "active";
+  // Payment state comes from the PRACTICE (written by the Stripe webhook), not
+  // from `users.account_status`: a checkout now activates the practice itself, so
+  // there is no human activation step left to wait for.
+  const billingStatus = (user?.billingStatus ?? "active") as
+    | "active"
+    | "past_due"
+    | "cancelled";
+  const pastDue = billingStatus === "past_due";
+  const cancelled = billingStatus === "cancelled";
 
   const daysLeft = (() => {
     if (!trialEndsAt) return 0;
@@ -127,19 +159,10 @@ function BillingPage() {
                 {checkoutPlan ? ` for the ${checkoutPlan.name} plan` : ""}.
               </h2>
               <p className="mt-1 text-sm text-green-800">
-                Your account is being activated. Activation is completed by our
-                team, and we will email you
-                {user?.email ? (
-                  <>
-                    {" "}
-                    at <span className="font-medium">{user.email}</span>
-                  </>
-                ) : (
-                  " at the address you used at checkout"
-                )}{" "}
-                as soon as it is done — usually within one business day. Until
-                then your plan below may still show as your previous plan, and
-                you are not charged twice.
+                Your plan activates automatically as soon as Stripe confirms the
+                payment — usually within a minute, with no step for you to wait
+                on. Reload this page and the plan below will show the one you
+                bought. You are not charged twice.
               </p>
               <p className="mt-2 text-xs text-green-700">
                 Your Stripe receipt was emailed to you by Stripe at checkout.
@@ -209,7 +232,7 @@ function BillingPage() {
                     Trial expired
                   </span>
                 )}
-                {activationPending && (
+                {(pastDue || cancelled) && (
                   <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-medium text-amber-700">
                     <svg
                       className="h-3.5 w-3.5"
@@ -225,10 +248,10 @@ function BillingPage() {
                         d="M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z"
                       />
                     </svg>
-                    Activation pending
+                    {cancelled ? "Read-only" : "Payment past due"}
                   </span>
                 )}
-                {!onTrial && !activationPending && (
+                {!onTrial && !pastDue && !cancelled && (
                   <span className="inline-flex items-center gap-1 rounded-full bg-green-100 px-2.5 py-0.5 text-xs font-medium text-green-700">
                     <svg
                       className="h-3.5 w-3.5"
@@ -271,9 +294,11 @@ function BillingPage() {
                       ).toLowerCase()})`
                     : ""}
                   .{" "}
-                  {activationPending
-                    ? "This plan is awaiting activation by our team — we'll email you as soon as it's live."
-                    : "Manage your plan below."}
+                  {cancelled
+                    ? "This subscription was cancelled, so the practice is read-only. Every client, assessment and plan is kept — choose a plan below to reactivate."
+                    : pastDue
+                      ? "A payment did not go through. Access continues while Stripe retries the card; update your payment method to clear this."
+                      : "Manage your plan below."}
                 </p>
               )}
             </div>
@@ -407,7 +432,7 @@ function BillingPage() {
                   </div>
                 ) : (
                   <a
-                    href={plan.stripePaymentLink}
+                    href={checkoutHref(plan.stripePaymentLink, checkoutPracticeId)}
                     className={`mt-auto rounded-md px-4 py-2.5 text-center text-sm font-semibold text-white shadow-sm transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-indigo-500 ${plan.ui.accent}`}
                     aria-label={`${ctaLabel} — $${plan.priceUsd} per month, checkout on Stripe`}
                   >
