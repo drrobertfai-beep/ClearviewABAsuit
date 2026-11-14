@@ -14,16 +14,11 @@
 
 import { auditChange } from "./audit";
 import { sql } from "./sql";
-import type { PlanTier } from "./types";
+import type { PlanTier, PracticeBillingStatus } from "./types";
 import { PLANS } from "~/lib/plans";
 
-/**
- * Whether the practice is paying.
- *   active    — current (also the state of an unpaid trial account)
- *   past_due  — payment failed; access continues, banner shown
- *   cancelled — subscription gone; READ-ONLY, all data preserved
- */
-export type BillingStatus = "active" | "past_due" | "cancelled";
+/** Re-exported so callers of this module do not need two imports. */
+export type BillingStatus = PracticeBillingStatus;
 
 export const BILLING_STATUSES: readonly BillingStatus[] = [
   "active",

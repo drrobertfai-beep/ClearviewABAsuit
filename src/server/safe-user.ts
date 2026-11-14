@@ -3,7 +3,12 @@
 // Kept free of database/server imports so the client bundle can import the type
 // and the mapper without pulling server code (or node: built-ins) into it.
 
-import type { PracticeContext, PracticeRole, User } from "~/db/types";
+import type {
+  PracticeBillingStatus,
+  PracticeContext,
+  PracticeRole,
+  User,
+} from "~/db/types";
 
 /** The authenticated user as returned to the browser: no password hash, plus
  * the practice they are acting in and their permission level inside it. */
@@ -11,6 +16,8 @@ export type SafeUser = Omit<User, "password_hash"> & {
   practiceId: string | null;
   practiceRole: PracticeRole | null;
   practiceName: string | null;
+  /** Whether the practice is paying — drives the past-due / read-only banners. */
+  billingStatus: PracticeBillingStatus | null;
 };
 
 export function toSafeUser(
@@ -30,5 +37,6 @@ export function toSafeUser(
     practiceId: practice?.practiceId ?? null,
     practiceRole: practice?.practiceRole ?? null,
     practiceName: practice?.practiceName ?? null,
+    billingStatus: practice?.practiceBillingStatus ?? null,
   };
 }

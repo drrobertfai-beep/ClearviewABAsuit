@@ -118,10 +118,50 @@ function RootComponent() {
           activePracticeId={activePracticeId}
         />
       )}
+      {user && <BillingBanner billingStatus={user.billingStatus ?? null} />}
       <main>
         <Outlet />
       </main>
     </RootDocument>
+  );
+}
+
+/**
+ * Shown on every page for a practice whose subscription needs attention:
+ * a failed payment (access continues) or a cancellation (read-only, data kept).
+ * Rendered from the session's practice billing status — never a hardcoded state.
+ */
+function BillingBanner({
+  billingStatus,
+}: {
+  billingStatus: string | null;
+}) {
+  if (billingStatus !== "past_due" && billingStatus !== "cancelled") return null;
+
+  const cancelled = billingStatus === "cancelled";
+  return (
+    <div
+      role="status"
+      className={
+        cancelled
+          ? "border-b border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900"
+          : "border-b border-red-300 bg-red-50 px-4 py-3 text-sm text-red-900"
+      }
+    >
+      <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-x-2 gap-y-1 px-2 sm:px-6 lg:px-8">
+        <span className="font-semibold">
+          {cancelled ? "Read-only practice" : "Payment past due"}
+        </span>
+        <span>
+          {cancelled
+            ? "The subscription for this practice was cancelled, so nothing can be changed. All clients, assessments and plans are kept."
+            : "A payment did not go through. Everything still works while Stripe retries the card."}
+        </span>
+        <Link to="/billing" className="font-semibold underline">
+          {cancelled ? "Reactivate" : "Update billing"}
+        </Link>
+      </div>
+    </div>
   );
 }
 

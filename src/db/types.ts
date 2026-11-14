@@ -218,9 +218,18 @@ export interface PracticeInvite {
  * The caller's tenancy context, resolved server-side from the session cookie on
  * every request. Never accept these values from the browser.
  */
+/**
+ * Whether the practice is paying. Set by the Stripe webhook (src/db/billing.ts):
+ *   active    — current (also the state of an unpaid trial account)
+ *   past_due  — a payment failed; access continues, a banner is shown
+ *   cancelled — subscription gone; READ-ONLY, all data preserved
+ */
+export type PracticeBillingStatus = "active" | "past_due" | "cancelled";
+
 export interface PracticeContext {
   practiceId: string;
   practiceRole: PracticeRole;
   practiceName: string;
   practicePlan: PlanTier;
+  practiceBillingStatus: PracticeBillingStatus;
 }
