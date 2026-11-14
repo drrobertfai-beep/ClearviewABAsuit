@@ -246,8 +246,12 @@ function TreatmentPlanDetailPage() {
       duration: string;
     }[]
   >(plan.maladaptive_behaviors, []);
+  // `id` is the goal's stable identifier and the key that links it to its
+  // progress record on a reauthorization, so it has to be part of the shape
+  // this page reads the goals jsonb into.
   const goals = parseJsonField<
     {
+      id: string;
       domain: string;
       description: string;
       measurement: string;
