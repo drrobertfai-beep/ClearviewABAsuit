@@ -329,3 +329,30 @@ CREATE INDEX IF NOT EXISTS idx_sessions_expires_at ON sessions (expires_at);
 ALTER TABLE sessions ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS sessions_all_access ON sessions;
 CREATE POLICY sessions_all_access ON sessions FOR ALL USING (true);
+
+-- ============================================================================
+-- STRIPE BILLING (webhook-driven activation)
+-- ============================================================================
+-- Activation is driven by POST /api/stripe/webhook (src/server/stripe-webhook.ts),
+-- never by a human flipping a plan. The practice row carries the Stripe ids so a
+-- later event can find the practice without `client_reference_id`.
+--
+-- `billing_status` is separate from `plan`: plan is WHAT they bought, billing
+-- status is whether it is being paid for. 'cancelled' is read-only (data kept),
+-- 'past_due' still has access and shows a banner.
+ALTER TABLE practices ADD COLUMN IF NOT EXISTS stripe_customer_id TEXT;
+ALTER TABLE practices ADD COLUMN IF NOT EXISTS stripe_subscription_id TEXT;
+ALTER TABLE practices ADD COLUMN IF NOT EXISTS billing_status TEXT NOT NULL DEFAULT 'active';
+CREATE INDEX IF NOT EXISTS idx_practices_stripe_customer_id ON practices (stripe_customer_id);
+
+-- Every Stripe event id that reached us, so a retried delivery applies once.
+-- `status` is 'processing' until the change is applied, 'applied' afterwards
+-- (a redelivery of an applied event is a no-op), or 'failed' (a redelivery is
+-- allowed to try again rather than losing the event).
+CREATE TABLE IF NOT EXISTS stripe_events (
+    id TEXT PRIMARY KEY,
+    type TEXT NOT NULL,
+    received_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    payload JSONB,
+    status TEXT NOT NULL DEFAULT 'processing'
+);
