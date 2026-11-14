@@ -16,6 +16,8 @@ const SESSION_COOKIE = "cv_auth_token";
 /** A request that is known to belong to a practice. */
 export interface RequestContext {
   user: SafeUser;
+  /** The caller's own session row — the unit the practice choice is stored on. */
+  sessionId: string;
   practiceId: string;
   practiceRole: PracticeRole;
 }
@@ -44,6 +46,7 @@ export async function requireSession(): Promise<RequestContext> {
 
   return {
     user: toSafeUser(result.user, result.practice),
+    sessionId: result.session.id,
     practiceId: result.practice.practiceId,
     practiceRole: result.practice.practiceRole,
   };

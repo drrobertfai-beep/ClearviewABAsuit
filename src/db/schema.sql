@@ -310,8 +310,17 @@ CREATE TABLE IF NOT EXISTS sessions (
     user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     token TEXT NOT NULL UNIQUE,
     expires_at TIMESTAMPTZ NOT NULL,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    -- The practice THIS session is acting in, when the account belongs to more
+    -- than one. NULL means "no explicit choice — use the most recently joined
+    -- active membership". Per-session (not per-user) so two devices can sit in
+    -- different practices, and so a removed membership is dropped automatically
+    -- on the next request. See getActiveMembership in src/db/practices.ts.
+    active_practice_id UUID REFERENCES practices(id) ON DELETE SET NULL
 );
+
+-- Existing databases: add the column to an already-created sessions table.
+ALTER TABLE sessions ADD COLUMN IF NOT EXISTS active_practice_id UUID REFERENCES practices(id) ON DELETE SET NULL;
 
 CREATE INDEX IF NOT EXISTS idx_sessions_token ON sessions (token);
 CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions (user_id);

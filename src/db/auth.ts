@@ -2,7 +2,8 @@
 // Session and user queries for authentication.
 
 import { sql } from "./sql";
-import type { PracticeContext, PracticeRole, User } from "./types";
+import { getActiveMembership } from "./practices";
+import type { PracticeContext, User } from "./types";
 
 export interface Session {
   id: string;
@@ -10,6 +11,8 @@ export interface Session {
   token: string;
   expires_at: string;
   created_at: string;
+  /** Practice this session is acting in, when the user chose one. */
+  active_practice_id?: string | null;
 }
 
 export interface SessionWithUser {
@@ -133,30 +136,37 @@ export async function getSessionByToken(token: string): Promise<SessionWithUser 
   const rows = await sql()`
     SELECT s.id as s_id, s.user_id as s_user_id, s.token as s_token,
            s.expires_at as s_expires_at, s.created_at as s_created_at,
+           s.active_practice_id as s_active_practice_id,
            u.id as u_id, u.email as u_email, u.name as u_name,
            u.role as u_role, u.password_hash as u_password_hash,
            u.plan as u_plan, u.trial_ends_at as u_trial_ends_at,
            u.stripe_customer_id as u_stripe_customer_id,
            u.account_status as u_account_status,
-           u.created_at as u_created_at,
-           p.id as p_id, p.name as p_name, p.plan as p_plan, pm.role as pm_role
+           u.created_at as u_created_at
     FROM sessions s
     JOIN users u ON u.id = s.user_id
-    LEFT JOIN LATERAL (
-      SELECT pm.practice_id, pm.role
-      FROM practice_members pm
-      WHERE pm.user_id = u.id AND pm.status = 'active'
-      -- Most recently joined active membership wins (see getActiveMembership
-      -- in src/db/practices.ts). Accepting an invite makes that practice active.
-      ORDER BY pm.joined_at DESC
-      LIMIT 1
-    ) pm ON TRUE
-    LEFT JOIN practices p ON p.id = pm.practice_id
     WHERE s.token = ${token} AND s.expires_at > now()
     LIMIT 1
   `;
   if (rows.length === 0) return null;
   const r = rows[0];
+  const user = rowToUser(r);
+
+  // The practice is resolved by getActiveMembership — THE tenancy rule, shared
+  // with every other caller. This query used to carry its own copy of the rule
+  // as a LATERAL join, which could drift from the one in practices.ts.
+  const storedPracticeId = r.s_active_practice_id
+    ? String(r.s_active_practice_id)
+    : null;
+  const practice = await getActiveMembership(user.id, storedPracticeId);
+
+  // A stored choice that no longer resolves (membership removed, practice
+  // deleted) is cleared so the session falls back to the default rule from now
+  // on. Never an error: the request simply continues in the fallback practice.
+  if (storedPracticeId && practice?.practiceId !== storedPracticeId) {
+    await clearSessionActivePractice(String(r.s_id));
+  }
+
   return {
     session: {
       id: String(r.s_id),
@@ -164,17 +174,38 @@ export async function getSessionByToken(token: string): Promise<SessionWithUser 
       token: String(r.s_token),
       expires_at: r.s_expires_at instanceof Date ? r.s_expires_at.toISOString() : String(r.s_expires_at),
       created_at: r.s_created_at instanceof Date ? r.s_created_at.toISOString() : String(r.s_created_at),
+      active_practice_id: storedPracticeId,
     },
-    user: rowToUser(r),
-    practice: r.p_id
-      ? {
-          practiceId: String(r.p_id),
-          practiceName: String(r.p_name),
-          practicePlan: r.p_plan as PracticeContext["practicePlan"],
-          practiceRole: r.pm_role as PracticeRole,
-        }
-      : null,
+    user,
+    practice,
   };
+}
+
+/**
+ * Record which practice a session is acting in (the practice switcher).
+ *
+ * Scoped to the session row, so the same login on another device keeps its own
+ * choice. Only ever called after the caller's membership in `practiceId` has
+ * been verified.
+ */
+export async function setSessionActivePractice(
+  sessionId: string,
+  practiceId: string | null,
+): Promise<void> {
+  await sql()`
+    UPDATE sessions
+    SET active_practice_id = ${practiceId}::uuid
+    WHERE id = ${sessionId}::uuid
+  `;
+}
+
+/** Forget a session's practice choice (stale id, or membership lost). */
+async function clearSessionActivePractice(sessionId: string): Promise<void> {
+  await sql()`
+    UPDATE sessions
+    SET active_practice_id = NULL
+    WHERE id = ${sessionId}::uuid
+  `;
 }
 
 export async function deleteSession(token: string): Promise<void> {

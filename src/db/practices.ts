@@ -25,28 +25,47 @@ function toIso(value: unknown): string {
   return value instanceof Date ? value.toISOString() : String(value ?? "");
 }
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 /**
  * Resolve the practice a user is currently acting in.
  *
  * This is THE tenancy lookup: it runs server-side from the session cookie on
- * every request.
+ * every request. `src/db/auth.ts` calls it rather than resolving the practice
+ * itself, so there is exactly one implementation of the rule and the two can
+ * never disagree.
  *
- * Which practice wins when an account belongs to more than one: the MOST
- * RECENTLY JOINED active membership (phase 2 — joining a practice by accepting
- * an invite makes that practice the one you land in). A user who is removed
- * from a practice they joined falls back to their next most recent active
- * membership, normally the practice created at their own signup. There is no
- * practice switcher yet; this ordering is the whole rule.
+ * Resolution order:
+ *   1. `preferredPracticeId` (the session's `active_practice_id`) IF the user
+ *      still holds an ACTIVE membership there — this is what the practice
+ *      switcher writes.
+ *   2. Otherwise the most recently joined active membership (phase 2 rule:
+ *      accepting an invite makes that practice the one you land in).
+ *   3. A stale preference (membership removed, practice deleted) simply fails
+ *      step 1 and falls through — it never errors. The caller clears it.
  */
 export async function getActiveMembership(
   userId: string,
+  preferredPracticeId: string | null = null,
 ): Promise<PracticeContext | null> {
+  // Only a well-formed id is worth passing to the database; anything else is
+  // treated as "no preference" rather than raising a cast error.
+  const preferred =
+    typeof preferredPracticeId === "string" && UUID_RE.test(preferredPracticeId)
+      ? preferredPracticeId
+      : null;
+
   const rows = await sql()`
     SELECT p.id, p.name, p.plan, pm.role
     FROM practice_members pm
     JOIN practices p ON p.id = pm.practice_id
     WHERE pm.user_id = ${userId} AND pm.status = 'active'
-    ORDER BY pm.joined_at DESC, p.created_at DESC
+    -- NULLS LAST matters: with no stored preference every row yields NULL and
+    -- the comparison must not win. Postgres would otherwise sort NULLs first
+    -- on a DESC ordering and pick an arbitrary practice.
+    ORDER BY (pm.practice_id = ${preferred}::uuid) DESC NULLS LAST,
+             pm.joined_at DESC,
+             p.created_at DESC
     LIMIT 1
   `;
   if (rows.length === 0) return null;
