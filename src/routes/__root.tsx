@@ -14,6 +14,9 @@ import { useState } from "react";
 import appCss from "~/styles/app.css?url";
 import { getSessionFn, logoutFn } from "~/server/auth";
 import type { SafeUser } from "~/server/auth";
+import { getPracticeSwitcherFn } from "~/server/practice-switch";
+import type { SwitchablePractice } from "~/server/practice-switch";
+import { PracticeSwitcher } from "~/components/PracticeSwitcher";
 
 export const Route = createRootRoute({
   head: () => ({
@@ -33,6 +36,12 @@ export const Route = createRootRoute({
   }),
   beforeLoad: async ({ location }) => {
     const user = await getSessionFn();
+    // The practices this login can act in — the header only renders a switcher
+    // when there is more than one. Loaded here so the switcher is part of the
+    // server render, not something that pops in after hydration.
+    const switcher = user
+      ? await getPracticeSwitcherFn()
+      : { activePracticeId: null, practices: [] as SwitchablePractice[] };
 
     // Pages that are readable without a session. "/" is the public marketing
     // landing page (it renders the dashboard instead once a user is signed in).
@@ -63,7 +72,11 @@ export const Route = createRootRoute({
       throw redirect({ to: "/" });
     }
 
-    return { user };
+    return {
+      user,
+      practices: switcher.practices,
+      activePracticeId: switcher.activePracticeId,
+    };
   },
   notFoundComponent: () => (
     <div className="flex min-h-screen items-center justify-center">
@@ -87,6 +100,8 @@ export const Route = createRootRoute({
 function RootComponent() {
   const ctx = Route.useRouteContext();
   const user = ctx.user as SafeUser | null;
+  const practices = (ctx.practices ?? []) as SwitchablePractice[];
+  const activePracticeId = (ctx.activePracticeId ?? null) as string | null;
   // The landing page at "/" ships its own marketing header, so the app chrome
   // is hidden for signed-out visitors there.
   const pathname = useRouterState({
@@ -96,7 +111,13 @@ function RootComponent() {
 
   return (
     <RootDocument>
-      {showAppChrome && <NavBar user={user} />}
+      {showAppChrome && (
+        <NavBar
+          user={user}
+          practices={practices}
+          activePracticeId={activePracticeId}
+        />
+      )}
       <main>
         <Outlet />
       </main>
@@ -237,7 +258,15 @@ function getInitials(name: string): string {
     .toUpperCase();
 }
 
-function NavBar({ user }: { user: SafeUser | null }) {
+function NavBar({
+  user,
+  practices,
+  activePracticeId,
+}: {
+  user: SafeUser | null;
+  practices: SwitchablePractice[];
+  activePracticeId: string | null;
+}) {
   const router = useRouter();
   const [loggingOut, setLoggingOut] = useState(false);
 
@@ -288,6 +317,14 @@ function NavBar({ user }: { user: SafeUser | null }) {
           </svg>
           ClearView ABA Suite
         </Link>
+
+        {/* Practice switcher — one login, several practices */}
+        {user && (
+          <PracticeSwitcher
+            practices={practices}
+            activePracticeId={activePracticeId}
+          />
+        )}
 
         {/* Navigation links */}
         {user && (

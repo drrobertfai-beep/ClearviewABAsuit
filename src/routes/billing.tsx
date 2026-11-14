@@ -59,6 +59,8 @@ function BillingPage() {
     account_status?: string;
     email?: string;
     name?: string;
+    /** Practice this session is billing for — shown so the reader knows where they are. */
+    practiceName?: string | null;
   } | null;
 
   const currentPlan = user?.plan ?? "trial";
@@ -169,6 +171,14 @@ function BillingPage() {
           <h2 className="text-base font-semibold text-gray-900 mb-4">
             Current Plan
           </h2>
+          {user.practiceName && (
+            <p className="mb-4 text-sm text-gray-500">
+              Billing for{" "}
+              <span className="font-medium text-gray-700">
+                {user.practiceName}
+              </span>
+            </p>
+          )}
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
             <div>
               <div className="flex items-center gap-3">
