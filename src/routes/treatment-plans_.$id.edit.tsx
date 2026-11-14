@@ -42,6 +42,15 @@ import type {
   TitrationLine,
   TitrationPhase,
 } from "~/lib/treatment-plan-authz";
+import {
+  GOAL_PROGRESS_STATUSES,
+  ensureGoalIds,
+  goalProgressStatusLabel,
+  normalizeGoalProgress,
+  progressFor,
+  requestedGoals,
+} from "~/lib/reauthorization";
+import type { GoalProgress } from "~/lib/reauthorization";
 
 /** Display labels for the settings stored in the jsonb payload. */
 const SETTING_LABELS: Record<ServiceSetting, string> = {
@@ -106,6 +115,7 @@ type TabId =
   | "family"
   | "behavior"
   | "goals"
+  | "reauthorization"
   | "outcomes"
   | "parent"
   | "services"
@@ -132,6 +142,8 @@ type LocalConcurrentService = {
   frequency?: string;
 };
 type LocalMaladaptiveBehavior = {
+  /** Stable id — minted once per goal and kept across plan versions. */
+  id?: string;
   behavior: string;
   topography: string;
   frequency: string;
@@ -139,6 +151,8 @@ type LocalMaladaptiveBehavior = {
   duration: string;
 };
 type LocalSkillGoal = {
+  /** Stable id — minted once per goal and kept across plan versions. */
+  id: string;
   domain: string;
   description: string;
   measurement: string;
@@ -172,6 +186,10 @@ interface LocalForm {
   authorization_number: string;
   titration_rationale: string;
   titration_phases: TitrationPhase[];
+  /** Set when this plan is a reauthorization of a prior plan. */
+  prior_plan_id: string | null;
+  goal_progress: GoalProgress[];
+  hours_increase_justification: string;
   status: string;
 }
 
@@ -199,6 +217,9 @@ function emptyForm(): LocalForm {
     authorization_number: "",
     titration_rationale: "",
     titration_phases: [],
+    prior_plan_id: null,
+    goal_progress: [],
+    hours_increase_justification: "",
     status: "draft",
   };
 }
@@ -220,10 +241,7 @@ function planToLocal(plan: TreatmentPlan): LocalForm {
       [],
     ),
     behavior_intervention_plan: plan.behavior_intervention_plan ?? "",
-    skill_acquisition_goals: parseJsonField<LocalSkillGoal[]>(
-      plan.skill_acquisition_goals,
-      [],
-    ),
+    skill_acquisition_goals: ensureGoalIds(plan.skill_acquisition_goals).goals,
     assessment_outcomes: plan.assessment_outcomes ?? "",
     parent_training_goals: parseJsonField<LocalParentGoal[]>(
       plan.parent_training_goals,
@@ -247,6 +265,11 @@ function planToLocal(plan: TreatmentPlan): LocalForm {
     // open with an empty phase list.
     titration_rationale: plan.titration_rationale ?? "",
     titration_phases: normalizeTitrationPhases(plan.titration_phases),
+    // A reauthorization carries one progress record per prior goal; a first
+    // authorization has neither and behaves exactly as it always did.
+    prior_plan_id: plan.prior_plan_id ?? null,
+    goal_progress: normalizeGoalProgress(plan.goal_progress),
+    hours_increase_justification: plan.hours_increase_justification ?? "",
     status: plan.status,
   };
 }
@@ -267,6 +290,7 @@ function TreatmentPlanEditPage() {
     plan: TreatmentPlan | null;
     client: Client | null;
     assessment: Assessment | null;
+    priorPlan?: TreatmentPlan | null;
   };
   const navigate = useNavigate();
   const params = Route.useParams();
@@ -275,6 +299,10 @@ function TreatmentPlanEditPage() {
   const [client, setClient] = useState<Client | null>(initial.client);
   const [assessment, setAssessment] = useState<Assessment | null>(
     initial.assessment,
+  );
+  // The plan this one extends, when it is a reauthorization.
+  const [priorPlan, setPriorPlan] = useState<TreatmentPlan | null>(
+    initial.priorPlan ?? null,
   );
   const [form, setForm] = useState<LocalForm>(emptyForm());
   const [activeTab, setActiveTab] = useState<TabId>("client");
@@ -290,6 +318,7 @@ function TreatmentPlanEditPage() {
           setPlan(r.plan);
           setClient(r.client);
           setAssessment(r.assessment);
+          setPriorPlan(r.priorPlan ?? null);
         })
         .catch(() => {});
     }
@@ -380,6 +409,30 @@ function TreatmentPlanEditPage() {
 
   const handleSave = useCallback(async () => {
     if (!plan) return;
+    // A reauthorization may not raise the hours above the plan it extends
+    // without a reason on file — that is what gets a request kicked back.
+    const priorHours = priorPlan
+      ? totalHoursPerWeek(normalizeServiceLines(priorPlan.requested_services))
+      : 0;
+    if (
+      priorPlan &&
+      totalHoursPerWeek(form.requested_services) > priorHours + 0.001 &&
+      !form.hours_increase_justification.trim()
+    ) {
+      setSaveMsg(
+        "Requested hours are higher than the prior authorization — add a justification for the increase on the Reauthorization tab.",
+      );
+      setActiveTab("reauthorization");
+      return;
+    }
+    // Dropping a goal keeps its reason on the record, so a reason is required.
+    if (form.goal_progress.some((p) => p.dropped && !p.drop_reason.trim())) {
+      setSaveMsg(
+        "Every goal removed from the request needs a reason on the Reauthorization tab.",
+      );
+      setActiveTab("reauthorization");
+      return;
+    }
     setSaving(true);
     setSaveMsg("");
     try {
@@ -413,6 +466,12 @@ function TreatmentPlanEditPage() {
             authorization_number: form.authorization_number || null,
             titration_rationale: form.titration_rationale || null,
             titration_phases: form.titration_phases,
+            // Reauthorization: the prior plan link, the per-goal progress and
+            // the reason for any increase in hours travel with the plan.
+            prior_plan_id: form.prior_plan_id,
+            goal_progress: form.goal_progress,
+            hours_increase_justification:
+              form.hours_increase_justification.trim() || null,
             status: form.status as TreatmentPlan["status"],
           },
         },
@@ -916,6 +975,237 @@ function TreatmentPlanEditPage() {
     </div>
   );
 
+  // ---- Reauthorization ----
+  // The progress table is the heart of a reauthorization: what each carried
+  // goal did during the last period, and whether it is still being requested.
+  const renderReauthorizationTab = () => {
+    const progress = form.goal_progress;
+    const goals = form.skill_acquisition_goals;
+    const setProgress = (goalId: string, patch: Partial<GoalProgress>) =>
+      update({
+        goal_progress: progress.map((p) =>
+          p.goal_id === goalId ? { ...p, ...patch } : p,
+        ),
+      });
+    const priorNumber = priorPlan?.authorization_number?.trim();
+
+    return (
+      <div className="space-y-5">
+        <div className="rounded-md bg-indigo-50 p-4">
+          <h3 className="text-sm font-semibold text-indigo-900">
+            Reauthorization of{" "}
+            {priorPlan
+              ? formatDateOnly(priorPlan.created_at.slice(0, 10))
+              : "the prior plan"}
+          </h3>
+          <p className="mt-1 text-sm text-indigo-800">
+            Prior authorization number:{" "}
+            <span className="font-medium">{priorNumber || "Not recorded"}</span>
+          </p>
+          <p className="text-sm text-indigo-800">
+            Prior authorization period:{" "}
+            {priorPlan
+              ? `${formatDateOnly(priorPlan.authorization_start_date)} – ${formatDateOnly(priorPlan.authorization_end_date)}`
+              : "—"}
+          </p>
+          <p className="mt-1 text-sm text-indigo-800">
+            Hours per week: prior{" "}
+            <span className="font-medium">
+              {formatHours(priorRequestedHours)}
+            </span>{" "}
+            → this request{" "}
+            <span className="font-semibold">
+              {formatHours(totalRequestedHours)}
+            </span>
+          </p>
+        </div>
+
+        <Field
+          label={
+            hoursIncreased
+              ? "Justification for the increase in hours (required)"
+              : "Justification for the increase in hours (only needed if hours rise)"
+          }
+        >
+          <textarea
+            value={form.hours_increase_justification}
+            onChange={(e) =>
+              update({ hours_increase_justification: e.target.value })
+            }
+            className="input"
+            rows={3}
+            data-testid="hours-increase-justification"
+            placeholder="Why does this period need more hours than the last one? An increase without a clinical reason is what gets a request kicked back."
+          />
+          {justificationMissing && (
+            <p
+              className="mt-1 text-xs text-red-600"
+              data-testid="hours-increase-required"
+            >
+              This request is {formatHours(totalRequestedHours)} per week against
+              a prior {formatHours(priorRequestedHours)} — a reason for the
+              increase is required before the plan can be saved.
+            </p>
+          )}
+        </Field>
+
+        <div>
+          <h4 className="text-sm font-medium text-gray-700 mb-1">
+            Progress on the prior goals
+          </h4>
+          <p className="text-xs text-gray-500 mb-3">
+            The mastery criterion is each goal&apos;s own measurement from the
+            plan — it is not re-typed here, because mastery varies by skill
+            level.
+          </p>
+          <div className="space-y-3">
+            {goals.map((goal) => {
+              const record = progressFor(progress, goal.id);
+              if (!record) {
+                return (
+                  <div
+                    key={goal.id}
+                    className="rounded border border-dashed border-gray-300 p-3 text-sm text-gray-500"
+                  >
+                    <span className="font-medium text-gray-700">
+                      {goal.domain || "Unspecified Domain"}:
+                    </span>{" "}
+                    {goal.description || "—"}{" "}
+                    <span className="ml-1 rounded bg-gray-100 px-1.5 py-0.5 text-xs text-gray-600">
+                      New this period — no prior progress
+                    </span>
+                  </div>
+                );
+              }
+              return (
+                <div
+                  key={goal.id}
+                  data-testid="goal-progress-row"
+                  className={`rounded border p-3 space-y-2 ${
+                    record.dropped
+                      ? "border-gray-300 bg-gray-50"
+                      : "border-gray-200"
+                  }`}
+                >
+                  <div className="flex flex-wrap items-start justify-between gap-2">
+                    <p className="text-sm font-medium text-gray-900">
+                      {goal.domain || "Unspecified Domain"}:{" "}
+                      {goal.description || "—"}
+                    </p>
+                    {record.dropped ? (
+                      <button
+                        type="button"
+                        onClick={() => setProgress(goal.id, { dropped: false })}
+                        className="text-sm font-medium text-indigo-600 hover:text-indigo-800"
+                      >
+                        Keep in request
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => setProgress(goal.id, { dropped: true })}
+                        className="text-sm font-medium text-red-500 hover:text-red-700"
+                      >
+                        Remove from request
+                      </button>
+                    )}
+                  </div>
+                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                    <label className="block">
+                      <span className="text-xs text-gray-500">Baseline</span>
+                      <input
+                        value={record.baseline}
+                        onChange={(e) =>
+                          setProgress(goal.id, { baseline: e.target.value })
+                        }
+                        className="input"
+                        placeholder="Where the goal started"
+                      />
+                    </label>
+                    <label className="block">
+                      <span className="text-xs text-gray-500">
+                        Current (end of the prior period)
+                      </span>
+                      <input
+                        value={record.current}
+                        onChange={(e) =>
+                          setProgress(goal.id, { current: e.target.value })
+                        }
+                        className="input"
+                        placeholder="Where it is now"
+                      />
+                    </label>
+                  </div>
+                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                    <div>
+                      <span className="text-xs text-gray-500">
+                        Mastery criterion
+                      </span>
+                      <p className="text-sm text-gray-800">
+                        {goal.measurement || "Not recorded on the goal"}
+                      </p>
+                    </div>
+                    <label className="block">
+                      <span className="text-xs text-gray-500">Status</span>
+                      <select
+                        value={record.status}
+                        onChange={(e) =>
+                          setProgress(goal.id, {
+                            status: e.target.value as GoalProgress["status"],
+                          })
+                        }
+                        className="input"
+                      >
+                        {GOAL_PROGRESS_STATUSES.map((s) => (
+                          <option key={s} value={s}>
+                            {goalProgressStatusLabel(s)}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  </div>
+                  <label className="block">
+                    <span className="text-xs text-gray-500">Note</span>
+                    <textarea
+                      value={record.note}
+                      onChange={(e) =>
+                        setProgress(goal.id, { note: e.target.value })
+                      }
+                      className="input"
+                      rows={2}
+                      placeholder="The clinical story: what moved, what stalled, what changed at home or school."
+                    />
+                  </label>
+                  {record.dropped && (
+                    <label className="block">
+                      <span className="text-xs font-medium text-red-600">
+                        Reason for removing this goal from the new request
+                        (required)
+                      </span>
+                      <input
+                        value={record.drop_reason}
+                        onChange={(e) =>
+                          setProgress(goal.id, { drop_reason: e.target.value })
+                        }
+                        className="input"
+                        placeholder="e.g. Mastered at 90% across settings — carried as a maintenance target"
+                      />
+                    </label>
+                  )}
+                </div>
+              );
+            })}
+            {goals.length === 0 && (
+              <p className="text-sm text-gray-500">
+                This plan has no skill acquisition goals yet.
+              </p>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   const renderOutcomesTab = () => (
     <div className="space-y-5">
       {/* Assessment scores summary (read-only) */}
@@ -1177,6 +1467,22 @@ function TreatmentPlanEditPage() {
   // different tabs, so they drift apart easily. Flag it before export.
   const hoursMismatch =
     Math.abs(totalRequestedHours - totalScheduledHours) >= 0.1;
+
+  // ---- Reauthorization: hours carried forward ----
+  // Requested hours default to the prior plan's. If they rise, the increase
+  // needs a reason before the plan can be saved.
+  const priorRequestedHours = priorPlan
+    ? totalHoursPerWeek(normalizeServiceLines(priorPlan.requested_services))
+    : 0;
+  const hoursIncreased =
+    !!priorPlan && totalRequestedHours > priorRequestedHours + 0.001;
+  const justificationMissing =
+    hoursIncreased && !form.hours_increase_justification.trim();
+  // Removing a goal from the new request is an explicit action whose reason is
+  // kept on the plan, so a reason is required too.
+  const missingDropReason = form.goal_progress.some(
+    (p) => p.dropped && !p.drop_reason.trim(),
+  );
 
 
   // ---- Requested services (structured service lines) ----
@@ -2424,7 +2730,17 @@ function TreatmentPlanEditPage() {
           className="-mb-px flex space-x-2 overflow-x-auto"
           aria-label="Form sections"
         >
-          {TABS.map((tab) => (
+          {(form.prior_plan_id
+            ? [
+                ...TABS.slice(0, 4),
+                {
+                  id: "reauthorization" as TabId,
+                  label: "Reauthorization",
+                },
+                ...TABS.slice(4),
+              ]
+            : TABS
+          ).map((tab) => (
             <button
               key={tab.id}
               type="button"
@@ -2447,6 +2763,9 @@ function TreatmentPlanEditPage() {
         {activeTab === "family" && renderFamilyTab()}
         {activeTab === "behavior" && renderBehaviorTab()}
         {activeTab === "goals" && renderGoalsTab()}
+        {activeTab === "reauthorization" &&
+          form.prior_plan_id &&
+          renderReauthorizationTab()}
         {activeTab === "outcomes" && renderOutcomesTab()}
         {activeTab === "parent" && renderParentTab()}
         {activeTab === "services" && renderServicesTab()}

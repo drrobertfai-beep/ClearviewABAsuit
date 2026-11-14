@@ -58,8 +58,20 @@ const demoId = (n: number) =>
 
 const CLIENT_IDS = [1, 2, 3, 4, 5, 6].map((i) => demoId(100 + i));
 const ASSESSMENT_IDS = [1, 2, 3, 4].map((i) => demoId(200 + i));
-const PLAN_IDS = [1, 2, 3].map((i) => demoId(300 + i));
+const PLAN_IDS = [1, 2, 3, 4].map((i) => demoId(300 + i));
 const SIGNATURE_IDS = [1, 2, 3].map((i) => demoId(400 + i));
+
+// Stable goal ids for the first plan's goals. They are written once here and
+// reused by the reauthorization of that plan, because the id is what links a
+// goal to its progress record across authorization periods.
+const GOAL_IDS = {
+  manding: "de000000-0000-4000-8000-0000000a0001",
+  peerPlay: "de000000-0000-4000-8000-0000000a0002",
+  multiStep: "de000000-0000-4000-8000-0000000a0003",
+  intraverbal: "de000000-0000-4000-8000-0000000a0004",
+  // A goal added for the new period, so it has no prior progress record.
+  askingForInformation: "de000000-0000-4000-8000-0000000a0005",
+};
 
 // ---------------------------------------------------------------------------
 // Small helpers
@@ -644,6 +656,9 @@ const ASSESSMENTS = [
 const PLANS = [
   {
     id: PLAN_IDS[0],
+    prior_plan_id: null,
+    goal_progress: [],
+    hours_increase_justification: null,
     client_id: CLIENT_IDS[0],
     assessment_id: ASSESSMENT_IDS[0],
     status: "approved",
@@ -700,6 +715,7 @@ const PLANS = [
     skill_acquisition_goals: [
       {
         domain: "Communication — Manding",
+        id: GOAL_IDS.manding,
         description:
           "Client will independently mand for 20 different items or activities using three-word vocal approximations across three settings and three people.",
         measurement:
@@ -710,6 +726,7 @@ const PLANS = [
       },
       {
         domain: "Social Skills — Peer Play",
+        id: GOAL_IDS.peerPlay,
         description:
           "Client will initiate a peer interaction (offer a toy, ask a question, or join play) at least three times during a 30-minute free-play period.",
         measurement: "Frequency count during 30-minute observation",
@@ -719,6 +736,7 @@ const PLANS = [
       },
       {
         domain: "Listener Responding — Multi-Step Instructions",
+        id: GOAL_IDS.multiStep,
         description:
           "Client will follow novel three-step instructions with 80% accuracy across two instructors.",
         measurement:
@@ -729,6 +747,7 @@ const PLANS = [
       },
       {
         domain: "Intraverbal — WH Questions",
+        id: GOAL_IDS.intraverbal,
         description:
           "Client will answer 10 'what' and 'who' questions about familiar items and people.",
         measurement: "Percent accuracy across 3 consecutive probe sessions",
@@ -864,6 +883,9 @@ const PLANS = [
   },
   {
     id: PLAN_IDS[1],
+    prior_plan_id: null,
+    goal_progress: [],
+    hours_increase_justification: null,
     client_id: CLIENT_IDS[1],
     assessment_id: ASSESSMENT_IDS[1],
     status: "active",
@@ -995,10 +1017,10 @@ const PLANS = [
     ],
   },
   {
-    // Active plan: titration is filled in by the BCBA during the authorization period.
-    titration_rationale: null,
-    titration_phases: [],
     id: PLAN_IDS[2],
+    prior_plan_id: null,
+    goal_progress: [],
+    hours_increase_justification: null,
     client_id: CLIENT_IDS[3],
     assessment_id: ASSESSMENT_IDS[3],
     status: "draft",
@@ -1098,6 +1120,273 @@ const PLANS = [
     // case the plan view and PDF export have to render cleanly.
     titration_rationale: null,
     titration_phases: [],
+  },
+  // -------------------------------------------------------------------------
+  // 4. A reauthorization: the next authorization period for the first plan's
+  //    client, created from that plan. The four goals carried forward keep
+  //    their stable ids, so each has a progress record below. The intraverbal
+  //    goal is dropped for this period with its reason on file, and one new
+  //    goal is added — which is why it has no progress record.
+  // -------------------------------------------------------------------------
+  {
+    id: PLAN_IDS[3],
+    prior_plan_id: PLAN_IDS[0],
+    client_id: CLIENT_IDS[0],
+    assessment_id: ASSESSMENT_IDS[0],
+    status: "draft",
+    created: daysAgo(3, 10),
+    reason_for_referral:
+      "DEMO DATA. Reauthorization request for a second six-month authorization period under DEMO-AUTH-100241. The first period closed with the mand repertoire at criterion and measurable gains in peer play and listener responding; the intraverbal repertoire did not respond to the current teaching arrangement. The family and the school request continued comprehensive service at a reduced dose while the district opens an intraverbal program.",
+    diagnosis:
+      "Autism Spectrum Disorder (F84.0), Level 2 severity. Speech Delay (R47.9).",
+    treatment_history:
+      "DEMO DATA. Twenty-six weeks of comprehensive applied behavior analysis under DEMO-AUTH-100241, beginning at 23.5 hours per week and stepping down to 12 hours per week in the final phase, with caregiver training in every phase. No psychotropic medication.",
+    concurrent_services: [
+      {
+        service: "Speech Therapy",
+        provider: "Demo Children's Therapy Center — Sample SLP, MS, CCC-SLP",
+      },
+      {
+        service: "School-based intraverbal program",
+        provider: "Demo Unified School District — Special Education",
+      },
+    ],
+    family_history:
+      "DEMO DATA. Lives with both caregivers and one older sibling. Caregivers completed the parent training sequence and implement the functional communication protocol at home without coaching.",
+    school_info:
+      "DEMO DATA. Attends the district preschool four mornings per week with 1:1 support. The district began an intraverbal program this period, which is why that goal is not requested here.",
+    maladaptive_behaviors: [
+      {
+        behavior: "Tantrums",
+        topography:
+          "Crying, screaming, and dropping to the floor, sometimes with property disruption.",
+        function: "Escape from demands, access to preferred items",
+        frequency: "2–3 episodes per week (down from daily)",
+        intensity: "Mild — resolves within 2 minutes with a break request",
+        duration: "1–3 minutes",
+        antecedents: "Difficult tasks, denied access, transitions",
+        consequences: "Break or item delivered after a mand",
+        current_intervention:
+          "Functional communication training (break and item requests), three-step prompting, differential reinforcement of alternative behavior",
+      },
+      {
+        behavior: "Elopement",
+        topography: "Leaves the assigned area without permission.",
+        function: "Escape from demands, access to preferred areas",
+        frequency: "1 episode per week or fewer",
+        intensity: "Mild — returns when redirected",
+        duration: "Under 1 minute",
+        antecedents: "Transitions, preferred activity interrupted",
+        consequences: "Activity paused, then re-presented",
+        current_intervention:
+          "Transition warnings, non-contingent reinforcement, differential reinforcement of staying in the area",
+      },
+    ],
+    behavior_intervention_plan:
+      "DEMO DATA. The function-based plan continues unchanged into the new period: functional communication training for escape- and access-maintained behavior, three-step prompting, differential reinforcement of alternative behavior, and environmental arrangement for elopement. ABC data is collected for every episode and the plan is reviewed every 30 days. Both behaviors reduced by more than half during the prior authorization period, so the plan is continued rather than revised.",
+    skill_acquisition_goals: [
+      {
+        domain: "Communication — Manding",
+        id: GOAL_IDS.manding,
+        description:
+          "Client will independently mand for 25 different items or activities using three-word phrases across four settings and five communication partners.",
+        measurement:
+          "Percent independent across 10-trial sessions; 80% across 3 consecutive probes",
+        baseline: "20 independent mands across three settings",
+        target: "25 independent mands across four settings",
+        target_date: isoDaysAgo(-150),
+      },
+      {
+        domain: "Social Skills — Peer Play",
+        id: GOAL_IDS.peerPlay,
+        description:
+          "Client will initiate a peer interaction (offer a toy, ask a question, or join play) at least three times during a 30-minute free-play period.",
+        measurement: "Frequency count during 30-minute observation",
+        baseline: "1.8 initiations per observation",
+        target: "3 initiations per observation",
+        target_date: isoDaysAgo(-150),
+      },
+      {
+        domain: "Listener Responding — Multi-Step Instructions",
+        id: GOAL_IDS.multiStep,
+        description:
+          "Client will follow novel three-step instructions with 80% accuracy across two instructors.",
+        measurement:
+          "Percent accuracy, first-trial data, 10 trials per session",
+        baseline: "70% with three-step instructions",
+        target: "80% with three-step instructions",
+        target_date: isoDaysAgo(-150),
+      },
+      {
+        // Carried forward so the decision to drop it stays on file; it is not
+        // requested for this period (see goal_progress below).
+        domain: "Intraverbal — WH Questions",
+        id: GOAL_IDS.intraverbal,
+        description:
+          "Client will answer 10 'what' and 'who' questions about familiar items and people.",
+        measurement: "Percent accuracy across 3 consecutive probe sessions",
+        baseline: "2 questions",
+        target: "10 questions",
+        target_date: isoDaysAgo(-150),
+      },
+      {
+        domain: "Communication — Asking for Information",
+        id: GOAL_IDS.askingForInformation,
+        description:
+          "Client will ask 'where' and 'what' questions to obtain missing information in play routines.",
+        measurement:
+          "Percent independent across 10 opportunities per session",
+        baseline: "0 independent questions",
+        target: "8 of 10 opportunities",
+        target_date: isoDaysAgo(-150),
+      },
+    ],
+    goal_progress: [
+      {
+        goal_id: GOAL_IDS.manding,
+        baseline: "9 independent mands",
+        current: "20 independent mands across three settings and three people",
+        status: "mastered",
+        note: "Met the goal's criterion (80% independent across 3 consecutive probes) in week 18 of the prior period and maintained through the step-down to 12 hours per week.",
+        dropped: false,
+        drop_reason: "",
+      },
+      {
+        goal_id: GOAL_IDS.peerPlay,
+        baseline: "0.5 initiations per observation",
+        current: "1.8 initiations per observation",
+        status: "progressing",
+        note: "Steady gain across the period, mostly with one preferred peer. Generalizing to a second peer is the target for this period.",
+        dropped: false,
+        drop_reason: "",
+      },
+      {
+        goal_id: GOAL_IDS.multiStep,
+        baseline: "40% with two-step instructions",
+        current: "70% with three-step instructions",
+        status: "progressing",
+        note: "Acquired three-step instructions with one instructor; the second instructor and novel instructions remain.",
+        dropped: false,
+        drop_reason: "",
+      },
+      {
+        goal_id: GOAL_IDS.intraverbal,
+        baseline: "2 questions",
+        current: "4 questions",
+        status: "discontinued",
+        note: "Probe data stayed between 2 and 4 questions across 26 weeks of discrete trial teaching, so a different teaching arrangement is warranted.",
+        dropped: true,
+        drop_reason:
+          "Not requested this period: the school district opened an intraverbal program and the school SLP is targeting WH questions, so the goal is transferred rather than duplicated. The team will review the school data at the next 90-day review.",
+      },
+    ],
+    assessment_outcomes:
+      "DEMO DATA. VB-MAPP milestones now place the client in early Level 3 for mand and listener responding, with intraverbal and social repertoires remaining in Level 2. Prompt dependency has decreased but conditional discrimination remains a barrier.",
+    parent_training_goals: [
+      {
+        goal: "Run the functional communication protocol without coaching",
+        method: "Caregiver coaching with a written checklist and video review",
+        frequency: "1 session per month",
+      },
+      {
+        goal: "Contrive 5 requesting opportunities per hour during daily routines",
+        method: "Natural environment teaching during snack and play",
+        frequency: "Daily, reviewed weekly",
+      },
+    ],
+    service_coordination_goals: [
+      {
+        provider: "Demo Children's Therapy Center (SLP)",
+        goal: "Hand over intraverbal targets and share probe data",
+        method: "Monthly case conference and shared data review",
+      },
+      {
+        provider: "Demo Unified School District",
+        goal: "Support the new intraverbal program and classroom behavior strategies",
+        method: "One hour of school consultation per month",
+      },
+    ],
+    discharge_criteria:
+      "DEMO DATA. Discharge will be considered when the client independently requests needs across settings, problem behavior occurs no more than once per week and is managed by caregivers, and the client participates in the general education classroom with fading 1:1 support for 80% of the day.",
+    clinical_justification:
+      "DEMO DATA. Medical necessity continues. The prior authorization period produced measurable gains in requesting, listener responding and peer play, and cut problem behavior by more than half, which is why the same intervention is continued rather than replaced. The mand repertoire met criterion but is maintained by caregiver implementation and by the reduction of prompting, so a further period of direct treatment is required to generalize it across settings. Eighteen hours per week of direct intervention, supervised at 2.5 hours per week by a BCBA, is the least intensive dose expected to hold those gains while the remaining goals are addressed; the plan steps down to 12 hours per week when the criteria in the titration plan are met. The intraverbal goal is transferred to the school program and is therefore not requested here.",
+    authorization_start_date: isoDaysAgo(-2),
+    authorization_end_date: isoDaysAgo(-184),
+    authorization_number: "",
+    requested_services: [
+      {
+        cpt_code: "97153",
+        service_name: "Adaptive behavior treatment by protocol (direct 1:1)",
+        hours_per_week: 15,
+        session_duration_minutes: 180,
+        setting: "home",
+        provider_type: "RBT",
+      },
+      {
+        cpt_code: "97155",
+        service_name:
+          "Adaptive behavior treatment with protocol modification (BCBA supervision)",
+        hours_per_week: 2.5,
+        session_duration_minutes: 150,
+        setting: "clinic",
+        provider_type: "BCBA",
+      },
+      {
+        cpt_code: "97156",
+        service_name:
+          "Family adaptive behavior treatment guidance (caregiver training)",
+        hours_per_week: 0.5,
+        session_duration_minutes: 60,
+        setting: "telehealth",
+        provider_type: "Parent/Caregiver Training",
+      },
+    ],
+    // Must reconcile with requested_services above: 15h 97153 + 2.5h 97155
+    // + 0.5h 97156 = 18 hrs/week. `assertDemoHoursReconcile()` enforces it.
+    therapy_schedule: [
+      { day: "Monday", start_time: "09:00", end_time: "12:00", service: "97153", setting: "home", provider: "RBT" },
+      { day: "Tuesday", start_time: "09:00", end_time: "12:00", service: "97153", setting: "home", provider: "RBT" },
+      { day: "Wednesday", start_time: "09:00", end_time: "11:30", service: "97155", setting: "clinic", provider: "BCBA" },
+      { day: "Wednesday", start_time: "13:00", end_time: "16:00", service: "97153", setting: "home", provider: "RBT" },
+      { day: "Thursday", start_time: "09:00", end_time: "12:00", service: "97153", setting: "home", provider: "RBT" },
+      { day: "Friday", start_time: "09:00", end_time: "12:00", service: "97153", setting: "home", provider: "RBT" },
+      { day: "Friday", start_time: "13:00", end_time: "13:30", service: "97156", setting: "telehealth", provider: "Parent/Caregiver Training" },
+    ],
+    // The reauthorization asks for less than the prior period (23.5 → 18), so
+    // no hours-increase justification is required. Two phases: 18 → 12 hrs/wk.
+    hours_increase_justification: null,
+    titration_rationale:
+      "DEMO DATA. The new period opens at 18 hours per week — below the 23.5 hours the prior period was authorized at — because the requesting repertoire met criterion and problem behavior has more than halved. One planned reduction to 12 hours per week follows once peer play and listener responding are close to criterion, which is where the prior period ended. Caregiver training (97156) is protected at 0.5 hours per week in both phases, because caregiver implementation is what maintains the gains.",
+    titration_phases: [
+      {
+        label: "Phase 1 — Generalize",
+        start_week: 1,
+        end_week: 14,
+        lines: [
+          { cpt_code: "97153", hours_per_week: 15 },
+          { cpt_code: "97155", hours_per_week: 2.5 },
+          { cpt_code: "97156", hours_per_week: 0.5 },
+        ],
+        criteria_to_step_down:
+          "Step down to Phase 2 once peer initiations reach 3 or more per 30-minute observation across two peers, three-step instructions are followed at 80% accuracy with both instructors, and problem behavior stays at or below one episode per week for 3 consecutive weeks.",
+        criteria_to_step_up:
+          "Return to the prior period's 23.5 hours per week if problem behavior returns to the prior baseline of daily episodes across 2 consecutive weeks, or if previously mastered requesting targets drop below 80% independence.",
+      },
+      {
+        label: "Phase 2 — Maintain",
+        start_week: 15,
+        end_week: 26,
+        lines: [
+          { cpt_code: "97153", hours_per_week: 10 },
+          { cpt_code: "97155", hours_per_week: 1.5 },
+          { cpt_code: "97156", hours_per_week: 0.5 },
+        ],
+        criteria_to_step_down:
+          "Transition to maintenance and discharge from active treatment once the client requests needs independently across home, school and community settings for 4 consecutive weeks, problem behavior occurs no more than once per week, and caregivers maintain 90% protocol fidelity without coaching.",
+        criteria_to_step_up:
+          "Return to Phase 1 intensity if problem behavior occurs more than once per week for 2 consecutive weeks, a new topography of dangerous behavior emerges, or caregiver fidelity drops below 70%.",
+      },
+    ],
   },
 ];
 
@@ -1448,11 +1737,13 @@ async function seed() {
          clinical_justification, authorization_start_date,
          authorization_end_date, authorization_number, status,
          titration_rationale, titration_phases,
+         prior_plan_id, goal_progress, hours_increase_justification,
          created_at, updated_at, is_demo
        ) VALUES (
          $1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9, $10::jsonb, $11, $12::jsonb,
          $13, $14::jsonb, $15::jsonb, $16, $17::jsonb, $18::jsonb,
-         $19, $20::date, $21::date, $22, $23, $25, $26::jsonb, $24, $24, TRUE
+         $19, $20::date, $21::date, $22, $23, $25, $26::jsonb,
+         $27, $28::jsonb, $29, $24, $24, TRUE
        )`,
       [
         p.id,
@@ -1481,6 +1772,9 @@ async function seed() {
         p.created,
         p.titration_rationale ?? null,
         JSON.stringify(p.titration_phases ?? []),
+        p.prior_plan_id ?? null,
+        JSON.stringify(p.goal_progress ?? []),
+        p.hours_increase_justification ?? null,
       ],
     );
     pushAudit({
@@ -1630,6 +1924,9 @@ async function seed() {
   console.log(`   /treatment-plans/${PLAN_IDS[0]}`);
   console.log(
     `   /treatment-plans/${PLAN_IDS[2]}/edit   (draft plan — the editor)`,
+  );
+  console.log(
+    `   /treatment-plans/${PLAN_IDS[3]}/edit   (reauthorization of ${PLAN_IDS[0]} — carried goals, per-goal progress)`,
   );
   console.log(
     "\n🧹 Remove the demo practice at any time: bun src/db/seed-demo.ts --remove",

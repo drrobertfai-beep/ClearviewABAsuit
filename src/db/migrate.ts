@@ -13,6 +13,7 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { sql } from "./sql";
 import { DEMO_EMAIL } from "./demo-account";
+import { ensureGoalIds } from "../lib/reauthorization";
 
 /**
  * Split a SQL text into individual statements, handling:
@@ -308,6 +309,59 @@ export async function runTenancyBackfill(): Promise<BackfillReport> {
   return report;
 }
 
+/**
+ * Goal id backfill — gives every goal written before goal ids existed a stable
+ * id, so a reauthorization can say "this is the same goal as last period".
+ *
+ * It is idempotent by construction: `ensureGoalIds()` keeps an existing id and
+ * only mints one where there is none, so a second run mints nothing and a goal
+ * never ends up with two ids.
+ */
+export interface GoalIdBackfillReport {
+  plansScanned: number;
+  goalsMinted: number;
+}
+
+export async function runGoalIdBackfill(): Promise<GoalIdBackfillReport> {
+  const neon = sql();
+  const rows = (await neon.query(
+    `SELECT id, skill_acquisition_goals, maladaptive_behaviors
+       FROM treatment_plans`,
+  )) as {
+    id: string;
+    skill_acquisition_goals: unknown;
+    maladaptive_behaviors: unknown;
+  }[];
+
+  const report: GoalIdBackfillReport = {
+    plansScanned: rows.length,
+    goalsMinted: 0,
+  };
+
+  for (const row of rows) {
+    const skill = ensureGoalIds(row.skill_acquisition_goals);
+    const behavior = ensureGoalIds(row.maladaptive_behaviors);
+    const minted = skill.minted + behavior.minted;
+    if (minted === 0) continue;
+    // `updated_at` is deliberately left alone: this is a data migration, not a
+    // clinician editing the plan.
+    await neon.query(
+      `UPDATE treatment_plans
+          SET skill_acquisition_goals = $2::jsonb,
+              maladaptive_behaviors = $3::jsonb
+        WHERE id = $1`,
+      [
+        row.id,
+        JSON.stringify(skill.goals),
+        JSON.stringify(behavior.goals),
+      ],
+    );
+    report.goalsMinted += minted;
+  }
+
+  return report;
+}
+
 /** Apply src/db/schema.sql to the database. Safe to run repeatedly. */
 export async function applySchema(): Promise<MigrationResult> {
   try {
@@ -336,8 +390,21 @@ export async function applySchema(): Promise<MigrationResult> {
       `ALTER TABLE treatment_plans ADD COLUMN IF NOT EXISTS titration_phases JSONB DEFAULT '[]'::jsonb`,
     );
 
+    // Reauthorization columns. `prior_plan_id` self-references the plan a
+    // reauthorization extends; NULL means a first authorization.
+    await neonClient.query(
+      `ALTER TABLE treatment_plans ADD COLUMN IF NOT EXISTS prior_plan_id UUID REFERENCES treatment_plans(id) ON DELETE SET NULL`,
+    );
+    await neonClient.query(
+      `ALTER TABLE treatment_plans ADD COLUMN IF NOT EXISTS goal_progress JSONB DEFAULT '[]'::jsonb`,
+    );
+    await neonClient.query(
+      `ALTER TABLE treatment_plans ADD COLUMN IF NOT EXISTS hours_increase_justification TEXT`,
+    );
+
     // Data backfill runs after the schema statements and before NOT NULL.
     const backfill = await runTenancyBackfill();
+    const goalIds = await runGoalIdBackfill();
 
     return {
       success: true,
@@ -347,7 +414,8 @@ export async function applySchema(): Promise<MigrationResult> {
         `${backfill.membershipsCreated} membership(s) created, ` +
         `${backfill.clientsAssigned} client(s) assigned, ` +
         `${backfill.auditRowsAssigned} audit row(s) stamped` +
-        (backfill.practiceIdNotNull ? ", clients.practice_id is NOT NULL." : "."),
+        (backfill.practiceIdNotNull ? ", clients.practice_id is NOT NULL." : ".") +
+        ` — goal ids: ${goalIds.goalsMinted} minted across ${goalIds.plansScanned} plan(s).`,
       statements: statements.length,
       backfill,
     };

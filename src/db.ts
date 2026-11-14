@@ -500,6 +500,27 @@ export async function getTreatmentPlan(
   return rows.length > 0 ? coerceRow<TreatmentPlan>(rows[0]) : null;
 }
 
+/**
+ * The open draft that extends `priorPlanId`, if one exists. Starting a
+ * reauthorization twice therefore lands on the same draft instead of minting a
+ * second copy of the same goals.
+ */
+export async function findReauthorizationDraft(
+  practiceId: string,
+  priorPlanId: string,
+): Promise<TreatmentPlan | null> {
+  const rows = await sql()`
+    SELECT t.* FROM treatment_plans t
+    JOIN clients c ON c.id = t.client_id
+    WHERE t.prior_plan_id = ${priorPlanId}
+      AND t.status = 'draft'
+      AND c.practice_id = ${practiceId}
+    ORDER BY t.created_at DESC
+    LIMIT 1
+  `;
+  return rows.length > 0 ? coerceRow<TreatmentPlan>(rows[0]) : null;
+}
+
 export async function listTreatmentPlans(
   practiceId: string,
   opts?: {
@@ -558,6 +579,7 @@ export async function createTreatmentPlan(
       requested_services, therapy_schedule, clinical_justification,
       authorization_start_date, authorization_end_date, authorization_number,
       titration_rationale, titration_phases,
+      prior_plan_id, goal_progress, hours_increase_justification,
       status
     ) VALUES (
       ${data.client_id}, ${data.assessment_id ?? null},
@@ -580,6 +602,9 @@ export async function createTreatmentPlan(
       ${data.authorization_number ?? null},
       ${data.titration_rationale ?? null},
       ${JSON.stringify(data.titration_phases ?? [])}::jsonb,
+      ${data.prior_plan_id ?? null}::uuid,
+      ${JSON.stringify(data.goal_progress ?? [])}::jsonb,
+      ${data.hours_increase_justification ?? null},
       ${data.status ?? "draft"}
     )
     RETURNING *
@@ -626,7 +651,7 @@ export async function updateTreatmentPlan(
     "treatment_history", "family_history", "school_info",
     "behavior_intervention_plan", "assessment_outcomes", "discharge_criteria",
     "clinical_justification", "authorization_number", "titration_rationale",
-    "status",
+    "hours_increase_justification", "status",
   ];
   for (const f of scalarFields) {
     if (f in data) {
@@ -644,10 +669,15 @@ export async function updateTreatmentPlan(
       bindings.push((data as Record<string, unknown>)[f] || null);
     }
   }
+  // Self-reference to the plan a reauthorization extends.
+  if ("prior_plan_id" in data) {
+    parts.push(`prior_plan_id = $${idx++}::uuid`);
+    bindings.push(data.prior_plan_id || null);
+  }
   const jsonbFields = [
     "concurrent_services", "maladaptive_behaviors", "skill_acquisition_goals",
     "parent_training_goals", "service_coordination_goals", "requested_services",
-    "therapy_schedule", "titration_phases",
+    "therapy_schedule", "titration_phases", "goal_progress",
   ] as const;
   for (const f of jsonbFields) {
     if (f in data) {
