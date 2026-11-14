@@ -2,7 +2,10 @@
 // Read-only clinical document view of the full treatment plan.
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useMemo, useState, useCallback } from "react";
-import { getTreatmentPlanContextFn } from "~/server/treatment-plans";
+import {
+  createReauthorizationFn,
+  getTreatmentPlanContextFn,
+} from "~/server/treatment-plans";
 import type { TreatmentPlan, Client, Assessment, Signature } from "~/db/types";
 import { generateTreatmentPlanPDF } from "~/routes/api/-pdf";
 import {
@@ -28,6 +31,11 @@ import {
   totalHoursPerWeek,
 } from "~/lib/treatment-plan-authz";
 import type { ServiceSetting } from "~/lib/treatment-plan-authz";
+import {
+  goalProgressStatusLabel,
+  normalizeGoalProgress,
+  progressFor,
+} from "~/lib/reauthorization";
 
 /** Display labels for the settings stored in the jsonb payload. */
 const SETTING_LABELS: Record<ServiceSetting, string> = {
@@ -69,6 +77,7 @@ function TreatmentPlanDetailPage() {
     client: Client | null;
     assessment: Assessment | null;
     signatures?: Signature[];
+    priorPlan?: TreatmentPlan | null;
   };
   const navigate = useNavigate();
   const params = Route.useParams();
@@ -78,8 +87,14 @@ function TreatmentPlanDetailPage() {
   const [assessment, setAssessment] = useState<Assessment | null>(
     initial.assessment,
   );
+  // The plan this one extends, when it is a reauthorization.
+  const [priorPlan, setPriorPlan] = useState<TreatmentPlan | null>(
+    initial.priorPlan ?? null,
+  );
   const [loading, setLoading] = useState(!initial.plan);
   const [pdfLoading, setPdfLoading] = useState(false);
+  const [reauthLoading, setReauthLoading] = useState(false);
+  const [reauthError, setReauthError] = useState("");
 
   useEffect(() => {
     if (!initial.plan) {
@@ -89,6 +104,7 @@ function TreatmentPlanDetailPage() {
           setPlan(r.plan);
           setClient(r.client);
           setAssessment(r.assessment);
+          setPriorPlan(r.priorPlan ?? null);
         })
         .catch(() => {})
         .finally(() => setLoading(false));
@@ -119,6 +135,30 @@ function TreatmentPlanDetailPage() {
       alert("Failed to generate PDF. Please try again.");
     } finally {
       setPdfLoading(false);
+    }
+  };
+
+  // Starting a reauthorization opens a draft carrying the prior plan's goals,
+  // hours and titration. Opening it twice lands on the same draft.
+  const handleStartReauthorization = async () => {
+    setReauthLoading(true);
+    setReauthError("");
+    try {
+      const draft = await createReauthorizationFn({ data: { planId: plan.id } });
+      if (draft) {
+        navigate({
+          to: "/treatment-plans/$id/edit",
+          params: { id: draft.id },
+        });
+      }
+    } catch (err) {
+      setReauthError(
+        err instanceof Error && err.message
+          ? err.message
+          : "Could not start the reauthorization.",
+      );
+    } finally {
+      setReauthLoading(false);
     }
   };
 
@@ -229,6 +269,13 @@ function TreatmentPlanDetailPage() {
   const totalRequestedHours = totalHoursPerWeek(services);
   const totalScheduledHours = scheduledHoursPerWeek(schedule);
 
+  // Reauthorization: one progress record per carried-forward goal, keyed by
+  // the goal's stable id. Empty on a first authorization.
+  const goalProgress = normalizeGoalProgress(plan.goal_progress);
+  const priorRequestedHours = priorPlan
+    ? totalHoursPerWeek(normalizeServiceLines(priorPlan.requested_services))
+    : 0;
+
   const canEdit = plan.status === "draft" || plan.status === "review";
 
   // Signature state
@@ -318,8 +365,33 @@ function TreatmentPlanDetailPage() {
             Created {new Date(plan.created_at).toLocaleDateString()} · Updated{" "}
             {new Date(plan.updated_at).toLocaleDateString()}
           </p>
+          {plan.prior_plan_id && (
+            <p
+              className="mt-1 text-sm font-medium text-indigo-700"
+              data-testid="reauthorization-of"
+            >
+              Reauthorization of{" "}
+              {priorPlan
+                ? formatDateOnly(priorPlan.created_at.slice(0, 10))
+                : "a prior plan"}
+              {priorPlan?.authorization_number
+                ? ` · Prior authorization ${priorPlan.authorization_number}`
+                : ""}
+            </p>
+          )}
         </div>
         <div className="flex items-center gap-2">
+          {(plan.status === "approved" || plan.status === "active") && (
+            <button
+              type="button"
+              onClick={handleStartReauthorization}
+              disabled={reauthLoading}
+              data-testid="start-reauthorization"
+              className="inline-flex items-center gap-2 rounded-md bg-white px-4 py-2 text-sm font-semibold text-indigo-700 shadow-sm ring-1 ring-inset ring-indigo-300 hover:bg-indigo-50 transition-colors disabled:opacity-60"
+            >
+              {reauthLoading ? "Starting…" : "Create reauthorization"}
+            </button>
+          )}
           {canEdit && (
             <Link
               to="/treatment-plans/$id/edit"
@@ -387,6 +459,15 @@ function TreatmentPlanDetailPage() {
           </button>
         </div>
       </div>
+
+      {reauthError && (
+        <div
+          role="alert"
+          className="mb-4 rounded-md border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-700"
+        >
+          {reauthError}
+        </div>
+      )}
 
       {/* Document */}
       <div className="space-y-6">
@@ -814,10 +895,145 @@ function TreatmentPlanDetailPage() {
           </Section>
         )}
 
-        {/* Section 9: Titration Plan — the phased step-down of authorized
+        {/* Section 9: Reauthorization Progress — what each carried-forward goal
+            did during the prior period. This is what a reviewer reads to
+            justify the continued hours. */}
+        {plan.prior_plan_id && (
+          <Section title="9. Reauthorization Progress">
+            <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
+              <div>
+                <p className="text-xs font-semibold text-gray-500 uppercase">
+                  Reauthorization of
+                </p>
+                <p className="text-sm text-gray-800">
+                  {priorPlan
+                    ? formatDateOnly(priorPlan.created_at.slice(0, 10))
+                    : "—"}
+                </p>
+              </div>
+              <div>
+                <p className="text-xs font-semibold text-gray-500 uppercase">
+                  Prior authorization number
+                </p>
+                <p className="text-sm text-gray-800">
+                  {priorPlan?.authorization_number || "Not recorded"}
+                </p>
+              </div>
+              <div>
+                <p className="text-xs font-semibold text-gray-500 uppercase">
+                  Hours per week
+                </p>
+                <p className="text-sm text-gray-800">
+                  Prior {formatHours(priorRequestedHours)} → this request{" "}
+                  <span className="font-semibold text-indigo-700">
+                    {formatHours(totalRequestedHours)}
+                  </span>
+                </p>
+              </div>
+            </div>
+
+            {plan.hours_increase_justification && (
+              <div className="mb-4 rounded-md bg-amber-50 p-3">
+                <p className="text-xs font-semibold text-amber-800 uppercase">
+                  Justification for the increase in hours
+                </p>
+                <p className="mt-1 text-sm text-amber-900 whitespace-pre-line">
+                  {plan.hours_increase_justification}
+                </p>
+              </div>
+            )}
+
+            <div className="overflow-x-auto">
+              <table className="min-w-full text-sm" data-testid="goal-progress-table">
+                <thead>
+                  <tr className="border-b">
+                    <th className="py-2 pr-3 text-left text-xs font-semibold text-gray-500 uppercase">
+                      Goal
+                    </th>
+                    <th className="py-2 pr-3 text-left text-xs font-semibold text-gray-500 uppercase">
+                      Baseline
+                    </th>
+                    <th className="py-2 pr-3 text-left text-xs font-semibold text-gray-500 uppercase">
+                      Current
+                    </th>
+                    <th className="py-2 pr-3 text-left text-xs font-semibold text-gray-500 uppercase">
+                      Mastery criterion
+                    </th>
+                    <th className="py-2 pr-3 text-left text-xs font-semibold text-gray-500 uppercase">
+                      Status
+                    </th>
+                    <th className="py-2 text-left text-xs font-semibold text-gray-500 uppercase">
+                      Note
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {goals.map((g) => {
+                    const record = progressFor(goalProgress, g.id);
+                    if (!record || record.dropped) return null;
+                    return (
+                      <tr key={g.id} className="border-b align-top last:border-0">
+                        <td className="py-2 pr-3 text-gray-800">
+                          <span className="font-medium">{g.domain || "—"}</span>
+                          {g.description ? (
+                            <span className="block text-gray-600">
+                              {g.description}
+                            </span>
+                          ) : null}
+                        </td>
+                        <td className="py-2 pr-3 text-gray-600">
+                          {record.baseline || g.baseline || "—"}
+                        </td>
+                        <td className="py-2 pr-3 text-gray-600">
+                          {record.current || "—"}
+                        </td>
+                        <td className="py-2 pr-3 text-gray-600">
+                          {g.measurement || "—"}
+                        </td>
+                        <td className="py-2 pr-3">
+                          <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-700">
+                            {goalProgressStatusLabel(record.status)}
+                          </span>
+                        </td>
+                        <td className="py-2 text-gray-600 whitespace-pre-line">
+                          {record.note || "—"}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            {goalProgress.filter((p) => p.dropped).length > 0 && (
+              <div className="mt-4">
+                <h4 className="text-xs font-semibold text-gray-500 uppercase mb-1">
+                  Not requested this period
+                </h4>
+                <ul className="space-y-1">
+                  {goals.map((g) => {
+                    const record = progressFor(goalProgress, g.id);
+                    if (!record?.dropped) return null;
+                    return (
+                      <li key={g.id} className="text-sm text-gray-700">
+                        • {g.domain || "Goal"}: {g.description || "—"} —{" "}
+                        {goalProgressStatusLabel(record.status)}
+                        {record.drop_reason
+                          ? ` (${record.drop_reason})`
+                          : " (reason not recorded)"}
+                      </li>
+                    );
+                  })}
+                </ul>
+              </div>
+            )}
+          </Section>
+        )}
+
+        {/* Section 10: Titration Plan — the phased step-down of authorized
             hours. Plans written before titration existed render the empty
             state rather than a broken table. */}
-        <Section title="9. Titration Plan">
+        <Section title="10. Titration Plan">
           {(() => {
             const phases = normalizeTitrationPhases(plan.titration_phases);
             if (phases.length === 0) {

@@ -208,6 +208,23 @@ ALTER TABLE treatment_plans ADD COLUMN IF NOT EXISTS authorization_number TEXT;
 ALTER TABLE treatment_plans ADD COLUMN IF NOT EXISTS titration_rationale TEXT;
 ALTER TABLE treatment_plans ADD COLUMN IF NOT EXISTS titration_phases JSONB DEFAULT '[]'::jsonb;
 
+-- Reauthorization. A reauthorization is a treatment plan created from a prior
+-- plan, so `prior_plan_id` is a self-reference to the plan it extends (NULL for
+-- a first authorization, which keeps every existing plan working unchanged).
+-- `goal_progress` is one record per carried-forward goal, keyed by the goal's
+-- stable id:
+--   { goal_id, baseline, current, status, note, dropped, drop_reason }
+-- `hours_increase_justification` is required whenever the requested hours rise
+-- above the prior plan's — an increase without a reason gets the request
+-- kicked back, so the app refuses to save one.
+ALTER TABLE treatment_plans ADD COLUMN IF NOT EXISTS prior_plan_id UUID
+  REFERENCES treatment_plans(id) ON DELETE SET NULL;
+ALTER TABLE treatment_plans ADD COLUMN IF NOT EXISTS goal_progress JSONB DEFAULT '[]'::jsonb;
+ALTER TABLE treatment_plans ADD COLUMN IF NOT EXISTS hours_increase_justification TEXT;
+
+CREATE INDEX IF NOT EXISTS idx_treatment_plans_prior_plan_id
+  ON treatment_plans (prior_plan_id);
+
 -- ============================================================================
 -- SIGNATURES
 -- ============================================================================

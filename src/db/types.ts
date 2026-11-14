@@ -59,9 +59,16 @@ export interface ConcurrentService {
 }
 
 export interface SkillAcquisitionGoal {
+  /**
+   * Stable identifier minted once per goal (see src/lib/reauthorization.ts).
+   * It is what links a goal across plan versions, so it is never replaced.
+   */
+  id: string;
   domain: string;
   description: string;
   measurement: string;
+  baseline?: string;
+  target?: string;
   target_date: string;
 }
 
@@ -120,6 +127,21 @@ export interface TreatmentPlan {
    * written before titration existed hold nothing at all.
    */
   titration_phases: unknown;
+  /**
+   * The plan this one extends, when it is a reauthorization. NULL for a first
+   * authorization — which is what keeps every pre-existing plan unchanged.
+   */
+  prior_plan_id: string | null;
+  /**
+   * One progress record per carried-forward goal, keyed by the goal's stable
+   * id. Always read through `normalizeGoalProgress()`.
+   */
+  goal_progress: unknown;
+  /**
+   * Why the requested hours rise above the prior plan's. Required (enforced
+   * server-side) whenever the hours increase on a reauthorization.
+   */
+  hours_increase_justification: string | null;
   status: TreatmentPlanStatus;
   /** TRUE for rows created by the demo seed script. */
   is_demo?: boolean;

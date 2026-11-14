@@ -2,6 +2,11 @@
 // Uses jsPDF + jspdf-autotable for server-side PDF generation.
 // Named with "-" prefix so TanStack Start excludes it from the route tree.
 
+import {
+  goalProgressStatusLabel,
+  normalizeGoalProgress,
+  progressFor,
+} from "~/lib/reauthorization";
 import { createServerFn } from "@tanstack/react-start";
 import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
@@ -326,6 +331,7 @@ function buildTreatmentPlanPDF(
   plan: TreatmentPlan,
   client: Client | null,
   assessment: Assessment | null,
+  priorPlan: TreatmentPlan | null = null,
 ): Uint8Array {
   const doc = new jsPDF({ unit: "mm", format: "a4" });
   const today = fmtDate(new Date().toISOString());
@@ -334,7 +340,15 @@ function buildTreatmentPlanPDF(
 
   const concurrent = parseJson<{ service: string; provider: string; frequency?: string }[]>(plan.concurrent_services, []);
   const behaviors = parseJson<{ behavior: string; topography: string; frequency: string; intensity: string; duration: string }[]>(plan.maladaptive_behaviors, []);
-  const goals = parseJson<{ domain: string; description: string; measurement: string; baseline: string; target: string; target_date: string }[]>(plan.skill_acquisition_goals, []);
+  // Reauthorization: one progress record per carried-forward goal, keyed by the
+  // goal's stable id. Empty on a first authorization.
+  const goalProgress = normalizeGoalProgress(plan.goal_progress);
+  const goals = parseJson<{ id?: string; domain: string; description: string; measurement: string; baseline: string; target: string; target_date: string }[]>(plan.skill_acquisition_goals, []).filter((g) => {
+    // A goal dropped from the new request is listed, with its reason, in the
+    // reauthorization section instead of here.
+    const record = g.id ? progressFor(goalProgress, g.id) : undefined;
+    return !record?.dropped;
+  });
   const parentGoals = parseJson<{ goal: string; method: string; frequency: string }[]>(plan.parent_training_goals, []);
   const coordGoals = parseJson<{ provider: string; goal: string; method: string }[]>(plan.service_coordination_goals, []);
   // Read through the normalizers: plans saved before the authorization fields
@@ -882,6 +896,129 @@ function buildTreatmentPlanPDF(
     y += 8;
   }
 
+  // --- Section 16: Reauthorization Progress ---
+  // Only a reauthorization has a prior plan; a first authorization exports
+  // exactly as it did before this section existed.
+  if (plan.prior_plan_id) {
+    y = ensureSpace(doc, y, 60);
+    y = addSectionTitle(doc, "Section 16: Reauthorization Progress", y + 2);
+
+    const priorHours = priorPlan
+      ? totalHoursPerWeek(normalizeServiceLines(priorPlan.requested_services))
+      : 0;
+    const priorRows: [string, string][] = [
+      [
+        "Reauthorization of",
+        priorPlan ? fmtDate(priorPlan.created_at) : "A prior plan",
+      ],
+      [
+        "Prior authorization number",
+        priorPlan?.authorization_number || "Not recorded",
+      ],
+      [
+        "Prior authorization period",
+        priorPlan ? authorizationPeriodLabel(priorPlan) : "—",
+      ],
+      [
+        "Hours per week",
+        `Prior ${priorHours} → this request ${totalRequestedHours}`,
+      ],
+    ];
+    for (const [label, value] of priorRows) {
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(9);
+      doc.setTextColor(55, 65, 81);
+      doc.text(`${label}:`, 14, y);
+      doc.setFont("helvetica", "normal");
+      doc.text(value, 70, y);
+      y += 5;
+    }
+    y += 2;
+
+    if (plan.hours_increase_justification) {
+      doc.setFont("helvetica", "bold");
+      doc.setTextColor(55, 65, 81);
+      doc.text("Justification for the increase in hours:", 14, y);
+      y += 5;
+      doc.setFont("helvetica", "normal");
+      doc.setTextColor(75, 85, 99);
+      const justLines = doc.splitTextToSize(
+        plan.hours_increase_justification,
+        pageWidth - 28,
+      ) as string[];
+      for (const line of justLines) {
+        y = ensureSpace(doc, y, 5);
+        doc.text(line, 14, y);
+        y += 4.2;
+      }
+      y += 3;
+    }
+
+    const progressRows = goals
+      .map((g) => ({ goal: g, record: g.id ? progressFor(goalProgress, g.id) : undefined }))
+      .filter((row) => row.record && !row.record.dropped)
+      .map((row) => [
+        `${row.goal.domain || "—"}: ${row.goal.description || "—"}`,
+        row.record!.baseline || row.goal.baseline || "—",
+        row.record!.current || "—",
+        row.goal.measurement || "—",
+        goalProgressStatusLabel(row.record!.status),
+        row.record!.note || "—",
+      ]);
+
+    if (progressRows.length > 0) {
+      autoTable(doc, {
+        head: [["Goal", "Baseline", "Current", "Mastery criterion", "Status", "Note"]],
+        body: progressRows,
+        startY: y,
+        theme: "grid",
+        styles: { fontSize: 7, cellPadding: 2, valign: "top", overflow: "linebreak" },
+        headStyles: { fillColor: [5, 150, 105], textColor: 255, fontStyle: "bold" },
+        columnStyles: {
+          0: { cellWidth: 44 },
+          1: { cellWidth: 22 },
+          2: { cellWidth: 22 },
+          3: { cellWidth: 34 },
+          4: { cellWidth: 18 },
+        },
+        rowPageBreak: "avoid",
+        margin: { left: 14, right: 14 },
+      });
+      y = (doc as unknown as { lastAutoTable?: { finalY: number } }).lastAutoTable?.finalY ?? y + 6;
+      y += 4;
+    } else {
+      doc.setFontSize(9);
+      doc.setTextColor(107, 114, 128);
+      doc.text("No goal progress recorded.", 14, y);
+      y += 8;
+    }
+
+    const droppedRows = goals
+      .map((g) => ({ goal: g, record: g.id ? progressFor(goalProgress, g.id) : undefined }))
+      .filter((row) => row.record?.dropped);
+    if (droppedRows.length > 0) {
+      y = ensureSpace(doc, y, 16);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(8.5);
+      doc.setTextColor(55, 65, 81);
+      doc.text("Goals not requested this period:", 14, y);
+      y += 4.5;
+      doc.setFont("helvetica", "normal");
+      doc.setTextColor(75, 85, 99);
+      for (const row of droppedRows) {
+        const text = `${row.goal.domain || "Goal"}: ${row.goal.description || "—"} — ${goalProgressStatusLabel(row.record!.status)}${row.record!.drop_reason ? ` (${row.record!.drop_reason})` : ""}`;
+        const lines = doc.splitTextToSize(text, pageWidth - 28) as string[];
+        for (const line of lines) {
+          y = ensureSpace(doc, y, 5);
+          doc.text(line, 14, y);
+          y += 4.2;
+        }
+        y += 1.5;
+      }
+    }
+    y += 2;
+  }
+
   // --- Signature Block ---
   y = addSectionTitle(doc, "Signatures", Math.max(y + 4, doc.internal.pageSize.height - 70));
   const sigY = y + 10;
@@ -949,7 +1086,11 @@ export const generateTreatmentPlanPDF = createServerFn({ method: "GET" })
     if (plan.assessment_id) {
       assessment = await getAssessment(practiceId, plan.assessment_id);
     }
-    const pdfBytes = buildTreatmentPlanPDF(plan, client, assessment);
+    // The plan this one extends, when it is a reauthorization.
+    const priorPlan = plan.prior_plan_id
+      ? await getTreatmentPlan(practiceId, plan.prior_plan_id)
+      : null;
+    const pdfBytes = buildTreatmentPlanPDF(plan, client, assessment, priorPlan);
     return {
       base64: Buffer.from(pdfBytes).toString("base64"),
       filename: `Treatment_Plan_${(client?.name ?? "client").replace(/\s+/g, "_")}_${new Date().toISOString().split("T")[0]}.pdf`,
