@@ -387,7 +387,7 @@ export const getClientWithCompletedAssessmentsFn = createServerFn({
 export const getTreatmentPlanContextFn = createServerFn({ method: "GET" })
   .validator((d: unknown) => d as { planId: string })
   .handler(async ({ data }) => {
-    const { practiceId } = await requireSession();
+    const { practiceId, practiceRole } = await requireSession();
     const plan = await getTreatmentPlan(practiceId, data.planId);
     if (!plan) {
       return {
@@ -396,6 +396,7 @@ export const getTreatmentPlanContextFn = createServerFn({ method: "GET" })
         assessment: null,
         signatures: [],
         priorPlan: null,
+        practiceRole,
       };
     }
 
@@ -412,5 +413,5 @@ export const getTreatmentPlanContextFn = createServerFn({ method: "GET" })
       ? await getTreatmentPlan(practiceId, plan.prior_plan_id)
       : null;
 
-    return { plan, client, assessment, signatures, priorPlan };
+    return { plan, client, assessment, signatures, priorPlan, practiceRole };
   });

@@ -81,6 +81,7 @@ function AuditLogPage() {
       CREATE: "bg-green-100 text-green-800",
       UPDATE: "bg-blue-100 text-blue-800",
       DELETE: "bg-red-100 text-red-800",
+      READ: "bg-amber-100 text-amber-800",
     };
     return (
       <span
@@ -103,6 +104,7 @@ function AuditLogPage() {
 
     if (entry.action === "CREATE") return "Record created";
     if (entry.action === "DELETE") return "Record deleted";
+    if (entry.action === "READ") return "Record downloaded or viewed";
     if (!oldV && !newV) return "No changes";
 
     // Compare old and new
@@ -280,6 +282,7 @@ function AuditLogPage() {
               <option value="CREATE">CREATE</option>
               <option value="UPDATE">UPDATE</option>
               <option value="DELETE">DELETE</option>
+              <option value="READ">READ</option>
             </select>
           </div>
           <div>

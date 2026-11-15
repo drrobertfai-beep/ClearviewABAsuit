@@ -165,7 +165,23 @@ export interface Signature {
   is_demo?: boolean;
 }
 
-export type AuditAction = "CREATE" | "UPDATE" | "DELETE";
+export type AuditAction = "CREATE" | "UPDATE" | "DELETE" | "READ";
+
+/** An assessment graph attached to a plan. Bytes are never part of this shape. */
+export interface PlanAttachment {
+  id: string;
+  plan_id: string;
+  filename: string;
+  mime_type: string;
+  byte_size: number;
+  created_at: string;
+  uploaded_by_name: string | null;
+}
+
+/** An attachment together with its bytes, base64-encoded by Postgres. */
+export interface PlanAttachmentBytes extends PlanAttachment {
+  data_base64: string;
+}
 
 export interface AuditEntry {
   id: string;

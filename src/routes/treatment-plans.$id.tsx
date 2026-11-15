@@ -15,6 +15,7 @@ import {
 } from "~/server/signatures";
 import { SignaturePad } from "~/components/SignaturePad";
 import { SignatureSection } from "~/components/SignatureSection";
+import { PlanAttachments } from "~/components/PlanAttachments";
 import {
   cptLabel,
   formatDateOnly,
@@ -78,6 +79,7 @@ function TreatmentPlanDetailPage() {
     assessment: Assessment | null;
     signatures?: Signature[];
     priorPlan?: TreatmentPlan | null;
+    practiceRole?: string | null;
   };
   const navigate = useNavigate();
   const params = Route.useParams();
@@ -90,6 +92,11 @@ function TreatmentPlanDetailPage() {
   // The plan this one extends, when it is a reauthorization.
   const [priorPlan, setPriorPlan] = useState<TreatmentPlan | null>(
     initial.priorPlan ?? null,
+  );
+  // Attachments follow the same rule the server enforces: a viewer can read a
+  // plan but never change what is attached to it.
+  const [practiceRole, setPracticeRole] = useState<string | null>(
+    initial.practiceRole ?? null,
   );
   const [loading, setLoading] = useState(!initial.plan);
   const [pdfLoading, setPdfLoading] = useState(false);
@@ -105,6 +112,7 @@ function TreatmentPlanDetailPage() {
           setClient(r.client);
           setAssessment(r.assessment);
           setPriorPlan(r.priorPlan ?? null);
+          setPracticeRole(r.practiceRole ?? null);
         })
         .catch(() => {})
         .finally(() => setLoading(false));
@@ -1122,6 +1130,15 @@ function TreatmentPlanDetailPage() {
               </div>
             );
           })()}
+        </Section>
+
+        {/* Section 11: Assessment graphs attached to the plan. Served only
+            through the authenticated, practice-scoped attachment route. */}
+        <Section title="11. Assessment Graphs">
+          <PlanAttachments
+            planId={plan.id}
+            canEdit={["owner", "admin", "clinician"].includes(practiceRole ?? "")}
+          />
         </Section>
 
         {/* Signatures — rendered from the loader so a signed plan shows as
