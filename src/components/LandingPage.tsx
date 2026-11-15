@@ -18,8 +18,8 @@ import {
 const SCREENSHOT_CLIENTS = "/screenshots/clients-list.png";
 const SCREENSHOT_SIGNATURES = "/screenshots/treatment-plan-signatures.png";
 
-/** Primary CTA. The register page states the same 14-day trial. */
-const TRIAL_NOTE = "14-day free trial · no credit card required";
+/** Primary CTA. The register page states the same 30-day trial. */
+const TRIAL_NOTE = "30-day free trial · no credit card required";
 
 function Logo({ className = "h-7 w-7" }: { className?: string }) {
   return (
@@ -338,7 +338,7 @@ export function LandingPage() {
             Simple monthly pricing
           </h2>
           <p className="mt-3 max-w-2xl text-base text-gray-600">
-            Per practice, billed monthly. Every plan starts with a 14-day free
+            Per practice, billed monthly. Every plan starts with a 30-day free
             trial and no credit card.
           </p>
 
@@ -435,7 +435,7 @@ export function LandingPage() {
               Your next treatment plan could write itself
             </h2>
             <p className="mx-auto mt-3 max-w-2xl text-base text-indigo-100">
-              Start with a free 14-day trial. Add a client, complete a VB-MAPP,
+              Start with a free 30-day trial. Add a client, complete a VB-MAPP,
               and see the plan generate from it.
             </p>
             <div className="mt-8 flex flex-col items-center justify-center gap-3 sm:flex-row">
