@@ -35,7 +35,39 @@ export async function requireSession(): Promise<RequestContext> {
   if (!token) {
     throw new Error("Authentication required.");
   }
+  return contextForToken(token);
+}
 
+/**
+ * The same guard for a plain request handler (a route under src/routes/api),
+ * where the session cookie is read from the request headers instead of the
+ * server-function cookie store. Used by the attachment download route, so a file
+ * is only ever served to a signed-in member of the practice that owns it.
+ */
+export async function requireSessionForRequest(
+  request: Request,
+): Promise<RequestContext> {
+  const token = readSessionCookie(request.headers.get("cookie"));
+  if (!token) {
+    throw new Error("Authentication required.");
+  }
+  return contextForToken(token);
+}
+
+/** Pull `cv_auth_token` out of a raw Cookie header. */
+function readSessionCookie(header: string | null): string | null {
+  if (!header) return null;
+  for (const part of header.split(";")) {
+    const [name, ...rest] = part.trim().split("=");
+    if (name === SESSION_COOKIE) {
+      return decodeURIComponent(rest.join("="));
+    }
+  }
+  return null;
+}
+
+/** Resolve a session token to the caller's practice. */
+async function contextForToken(token: string): Promise<RequestContext> {
   const result = await getSessionByToken(token);
   if (!result) {
     throw new Error("Session expired. Please log in again.");

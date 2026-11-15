@@ -248,7 +248,7 @@ CREATE TABLE IF NOT EXISTS audit_log (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     table_name TEXT NOT NULL,
     record_id UUID NOT NULL,
-    action TEXT NOT NULL CHECK (action IN ('CREATE', 'UPDATE', 'DELETE')),
+    action TEXT NOT NULL CHECK (action IN ('CREATE', 'UPDATE', 'DELETE', 'READ')),
     changed_by TEXT,
     changed_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     old_values JSONB,
@@ -373,3 +373,40 @@ CREATE TABLE IF NOT EXISTS stripe_events (
     payload JSONB,
     status TEXT NOT NULL DEFAULT 'processing'
 );
+
+-- ============================================================================
+-- PLAN-LEVEL ATTACHMENTS (assessment graphs)
+-- ============================================================================
+-- Bytes live in the database, not an external file service, and there is no
+-- public URL: the only way to read a row is GET /api/plan-attachments?id=…,
+-- which resolves the caller's practice from the session and refuses anything
+-- else. Uploads and downloads are both written to audit_log.
+--
+-- An upload arrives in chunks (the request body limit on the production host is
+-- far below 10 MB), so a row exists before its bytes are complete: `completed_at`
+-- is NULL while the upload is still arriving, and every read filters on it.
+CREATE TABLE IF NOT EXISTS plan_attachments (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    practice_id UUID NOT NULL REFERENCES practices(id) ON DELETE CASCADE,
+    plan_id UUID NOT NULL REFERENCES treatment_plans(id) ON DELETE CASCADE,
+    filename TEXT NOT NULL,
+    mime_type TEXT NOT NULL,
+    byte_size INTEGER NOT NULL DEFAULT 0,
+    data BYTEA NOT NULL DEFAULT ''::bytea,
+    uploaded_by UUID REFERENCES users(id) ON DELETE SET NULL,
+    completed_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_plan_attachments_plan_id ON plan_attachments (plan_id);
+CREATE INDEX IF NOT EXISTS idx_plan_attachments_practice_id ON plan_attachments (practice_id);
+
+ALTER TABLE plan_attachments ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS plan_attachments_all_access ON plan_attachments;
+CREATE POLICY plan_attachments_all_access ON plan_attachments FOR ALL USING (true);
+
+-- Existing databases: the action check predates READ, which attachment downloads
+-- write. Widen it in place so the audit trail can record a view as well as a change.
+ALTER TABLE audit_log DROP CONSTRAINT IF EXISTS audit_log_action_check;
+ALTER TABLE audit_log ADD CONSTRAINT audit_log_action_check
+    CHECK (action IN ('CREATE', 'UPDATE', 'DELETE', 'READ'));

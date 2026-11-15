@@ -28,6 +28,28 @@ export {
 } from "./db/auth";
 export type { Session, SessionWithUser } from "./db/auth";
 
+// Plan-level attachment helpers (assessment graphs stored in Postgres)
+export {
+  MAX_ATTACHMENT_BYTES,
+  MAX_ATTACHMENTS_PER_PLAN,
+  ALLOWED_ATTACHMENT_MIME,
+  isAllowedMime,
+  sniffMime,
+  listPlanAttachments,
+  countPlanAttachments,
+  startPlanAttachment,
+  appendPlanAttachmentChunk,
+  completePlanAttachment,
+  getPlanAttachmentBytes,
+  auditAttachmentDownload,
+  listPlanAttachmentBytes,
+  deletePlanAttachment,
+} from "./db/attachments";
+export type {
+  PlanAttachment,
+  PlanAttachmentBytes,
+} from "./db/types";
+
 // Practice (tenant) helpers
 export {
   getActiveMembership,

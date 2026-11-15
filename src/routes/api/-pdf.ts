@@ -10,7 +10,14 @@ import {
 import { createServerFn } from "@tanstack/react-start";
 import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
-import { getAssessment, getClient, getTreatmentPlan } from "~/db";
+import { PDFDocument } from "pdf-lib";
+import {
+  getAssessment,
+  getClient,
+  getTreatmentPlan,
+  listPlanAttachmentBytes,
+} from "~/db";
+import type { PlanAttachmentBytes } from "~/db/types";
 import { requireSession } from "~/server/auth-guard";
 import type { Assessment, Client, TreatmentPlan } from "~/db/types";
 import {
@@ -106,6 +113,57 @@ function ensureSpace(doc: jsPDF, y: number, needed: number): number {
   if (y + needed <= bottom) return y;
   doc.addPage();
   return 25;
+}
+
+/**
+ * Pixel size of a PNG or JPEG, read from its header. Needed because jsPDF wants
+ * a width and height up front and the server has no DOM to measure with.
+ */
+function imagePixelSize(
+  bytes: Uint8Array,
+): { width: number; height: number } | null {
+  // PNG: IHDR width/height are the 4-byte big-endian values at 16 and 20.
+  if (
+    bytes.length > 24 &&
+    bytes[0] === 0x89 &&
+    bytes[1] === 0x50 &&
+    bytes[2] === 0x4e &&
+    bytes[3] === 0x47
+  ) {
+    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.length);
+    return { width: view.getUint32(16), height: view.getUint32(20) };
+  }
+  // JPEG: walk the segments to a start-of-frame marker.
+  if (bytes.length > 4 && bytes[0] === 0xff && bytes[1] === 0xd8) {
+    let i = 2;
+    while (i + 9 < bytes.length) {
+      if (bytes[i] !== 0xff) {
+        i += 1;
+        continue;
+      }
+      const marker = bytes[i + 1];
+      const isSof =
+        (marker >= 0xc0 && marker <= 0xc3) ||
+        (marker >= 0xc5 && marker <= 0xc7) ||
+        (marker >= 0xc9 && marker <= 0xcb) ||
+        (marker >= 0xcd && marker <= 0xcf);
+      if (isSof) {
+        const height = (bytes[i + 5] << 8) | bytes[i + 6];
+        const width = (bytes[i + 7] << 8) | bytes[i + 8];
+        if (width > 0 && height > 0) return { width, height };
+        return null;
+      }
+      const length = (bytes[i + 2] << 8) | bytes[i + 3];
+      if (length <= 0) return null;
+      i += 2 + length;
+    }
+  }
+  return null;
+}
+
+/** The base64 payload of an attachment as bytes. */
+function attachmentBytes(attachment: PlanAttachmentBytes): Uint8Array {
+  return new Uint8Array(Buffer.from(attachment.data_base64, "base64"));
 }
 
 // ---------------------------------------------------------------------------
@@ -332,6 +390,7 @@ function buildTreatmentPlanPDF(
   client: Client | null,
   assessment: Assessment | null,
   priorPlan: TreatmentPlan | null = null,
+  attachments: PlanAttachmentBytes[] = [],
 ): Uint8Array {
   const doc = new jsPDF({ unit: "mm", format: "a4" });
   const today = fmtDate(new Date().toISOString());
@@ -1019,6 +1078,96 @@ function buildTreatmentPlanPDF(
     y += 2;
   }
 
+  // --- Section 17: Assessment Graphs (plan-level attachments) ---
+  // PNG and JPG graphs are embedded here, in the body of the document a reviewer
+  // reads. Attached PDFs cannot be drawn onto this page, so they are listed here
+  // and their pages are appended after this document by the caller. Every
+  // attachment is named in the table either way, so the export still identifies
+  // a file whose pages could not be merged.
+  y = ensureSpace(doc, y, 30);
+  y = addSectionTitle(doc, "Section 17: Attached Assessment Graphs", y + 2);
+  if (attachments.length === 0) {
+    doc.setFontSize(9);
+    doc.setTextColor(107, 114, 128);
+    doc.text("No assessment graphs attached.", 14, y);
+    y += 8;
+  } else {
+    autoTable(doc, {
+      head: [["Attachment", "Type", "Size", "In this export"]],
+      body: attachments.map((a) => [
+        a.filename || "—",
+        a.mime_type === "application/pdf"
+          ? "PDF"
+          : a.mime_type === "image/png"
+            ? "PNG"
+            : "JPG",
+        a.byte_size >= 1024 * 1024
+          ? `${(a.byte_size / (1024 * 1024)).toFixed(1)} MB`
+          : `${Math.max(1, Math.round(a.byte_size / 1024))} KB`,
+        a.mime_type === "application/pdf"
+          ? "Pages appended at the end"
+          : "Graph reproduced below",
+      ]),
+      startY: y,
+      theme: "grid",
+      styles: { fontSize: 8, cellPadding: 2, valign: "top", overflow: "linebreak" },
+      headStyles: { fillColor: [79, 70, 229], textColor: 255, fontStyle: "bold" },
+      columnStyles: { 0: { cellWidth: 70 }, 1: { cellWidth: 16 }, 2: { cellWidth: 22 } },
+      rowPageBreak: "avoid",
+      margin: { left: 14, right: 14 },
+    });
+    y = (doc as unknown as { lastAutoTable?: { finalY: number } }).lastAutoTable?.finalY ?? y + 6;
+    y += 6;
+
+    // Images, one per block: caption, then the graph scaled to the text width.
+    for (const attachment of attachments) {
+      if (attachment.mime_type === "application/pdf") continue;
+      const bytes = attachmentBytes(attachment);
+      const size = imagePixelSize(bytes);
+      const maxWidth = pageWidth - 28;
+      const maxHeight = 110;
+      let drawWidth = maxWidth;
+      let drawHeight = maxHeight;
+      if (size) {
+        const ratio = size.height / size.width;
+        drawWidth = maxWidth;
+        drawHeight = maxWidth * ratio;
+        if (drawHeight > maxHeight) {
+          drawHeight = maxHeight;
+          drawWidth = maxHeight / ratio;
+        }
+      }
+      y = ensureSpace(doc, y, Math.min(drawHeight, maxHeight) + 14);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(9);
+      doc.setTextColor(55, 65, 81);
+      const caption = doc.splitTextToSize(
+        attachment.filename || "Assessment graph",
+        pageWidth - 28,
+      ) as string[];
+      doc.text(caption, 14, y);
+      y += caption.length * 4.5;
+      try {
+        doc.addImage(
+          `data:${attachment.mime_type};base64,${attachment.data_base64}`,
+          attachment.mime_type === "image/png" ? "PNG" : "JPEG",
+          14,
+          y,
+          drawWidth,
+          drawHeight,
+        );
+        y += drawHeight + 8;
+      } catch {
+        // An image the PDF writer cannot decode is still named in the table above.
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(8);
+        doc.setTextColor(107, 114, 128);
+        doc.text("(This image could not be embedded.)", 14, y + 4);
+        y += 12;
+      }
+    }
+  }
+
   // --- Signature Block ---
   y = addSectionTitle(doc, "Signatures", Math.max(y + 4, doc.internal.pageSize.height - 70));
   const sigY = y + 10;
@@ -1090,9 +1239,43 @@ export const generateTreatmentPlanPDF = createServerFn({ method: "GET" })
     const priorPlan = plan.prior_plan_id
       ? await getTreatmentPlan(practiceId, plan.prior_plan_id)
       : null;
-    const pdfBytes = buildTreatmentPlanPDF(plan, client, assessment, priorPlan);
+    // Assessment graphs attached to the plan: images are embedded in the body,
+    // PDFs have their pages appended below.
+    const attachments = await listPlanAttachmentBytes(practiceId, plan.id);
+    const pdfBytes = buildTreatmentPlanPDF(
+      plan,
+      client,
+      assessment,
+      priorPlan,
+      attachments,
+    );
+
+    // Append the pages of any attached PDF so the reviewer still gets one
+    // document. If a file cannot be merged (corrupt or encrypted), the export
+    // keeps the document it already has — the attachment is still listed by
+    // name in Section 17, so nothing silently disappears.
+    const uploadedPdfs = attachments.filter(
+      (a) => a.mime_type === "application/pdf",
+    );
+    let finalBytes: Uint8Array = pdfBytes;
+    if (uploadedPdfs.length > 0) {
+      try {
+        const merged = await PDFDocument.load(pdfBytes);
+        for (const upload of uploadedPdfs) {
+          const source = await PDFDocument.load(attachmentBytes(upload), {
+            ignoreEncryption: true,
+          });
+          const pages = await merged.copyPages(source, source.getPageIndices());
+          for (const page of pages) merged.addPage(page);
+        }
+        finalBytes = await merged.save();
+      } catch (err) {
+        console.error("Appending attached PDFs failed:", err);
+      }
+    }
+
     return {
-      base64: Buffer.from(pdfBytes).toString("base64"),
+      base64: Buffer.from(finalBytes).toString("base64"),
       filename: `Treatment_Plan_${(client?.name ?? "client").replace(/\s+/g, "_")}_${new Date().toISOString().split("T")[0]}.pdf`,
     };
   });
