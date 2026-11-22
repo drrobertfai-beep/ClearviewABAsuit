@@ -64,7 +64,7 @@ CREATE TABLE IF NOT EXISTS users (
     role TEXT NOT NULL DEFAULT 'bcba' CHECK (role IN ('bcba', 'bcaba', 'admin', 'parent')),
     password_hash TEXT NOT NULL,
     plan TEXT NOT NULL DEFAULT 'trial' CHECK (plan IN ('trial', 'solo', 'practice', 'clinic')),
-    trial_ends_at TIMESTAMPTZ DEFAULT (now() + INTERVAL '14 days'),
+    trial_ends_at TIMESTAMPTZ DEFAULT (now() + INTERVAL '30 days'),
     stripe_customer_id TEXT,
     account_status TEXT NOT NULL DEFAULT 'trial' CHECK (account_status IN ('trial', 'active', 'past_due', 'cancelled')),
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -80,7 +80,7 @@ CREATE INDEX IF NOT EXISTS idx_users_role ON users (role);
 -- table already exists, so the billing columns are re-asserted here. This is
 -- what makes the plan/checkout work deployable to an existing database.
 ALTER TABLE users ADD COLUMN IF NOT EXISTS plan TEXT NOT NULL DEFAULT 'trial';
-ALTER TABLE users ADD COLUMN IF NOT EXISTS trial_ends_at TIMESTAMPTZ DEFAULT (now() + INTERVAL '14 days');
+ALTER TABLE users ADD COLUMN IF NOT EXISTS trial_ends_at TIMESTAMPTZ DEFAULT (now() + INTERVAL '30 days');
 ALTER TABLE users ADD COLUMN IF NOT EXISTS stripe_customer_id TEXT;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS account_status TEXT NOT NULL DEFAULT 'trial';
 

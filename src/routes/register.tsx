@@ -222,7 +222,7 @@ function RegisterPage() {
               Choose Your Plan
             </h3>
             <p className="text-sm text-gray-500 mb-4">
-              All plans start with a free 14-day trial. No credit card required.
+              All plans start with a free 30-day trial. No credit card required.
             </p>
 
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
@@ -323,7 +323,7 @@ function RegisterPage() {
                 Creating account…
               </span>
             ) : (
-              `Start Free 14-Day Trial — ${PLANS.find((p) => p.id === selectedPlan)?.name ?? "Solo"} Plan`
+              `Start Free 30-Day Trial — ${PLANS.find((p) => p.id === selectedPlan)?.name ?? "Solo"} Plan`
             )}
           </button>
 
