@@ -61,8 +61,10 @@ export const getPracticeMembersFn = createServerFn({ method: "GET" }).handler(
 // ---------------------------------------------------------------------------
 // createPracticeInviteFn — email + role → invite link
 //
-// There is no outbound email in this app. The token is returned to the caller
-// so the UI can show a copyable link; nothing here claims an email was sent.
+// The token is returned to the caller so the UI can show a copyable link. The
+// invite email is sent by a separate server function (~/server/mail), which the
+// members page calls with the token once this succeeds — so creating an invite
+// still works with no mail configured.
 // ---------------------------------------------------------------------------
 export const createPracticeInviteFn = createServerFn({ method: "POST" })
   .validator((d: unknown) => d as { email?: unknown; role?: unknown })

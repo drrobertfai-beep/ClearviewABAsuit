@@ -5,8 +5,11 @@
 // the invite form, role controls and remove buttons render only for owner/admin
 // and are enforced again on the server.
 //
-// There is NO outbound email in this app. An invite is a link the owner copies
-// and sends themselves — nothing on this page claims an email was sent.
+// Invites are emailed when the app has mail configured (SMTP_HOST, SMTP_PORT,
+// SMTP_USER, SMTP_PASS, MAIL_FROM — see ~/server/mail.ts). When it is not
+// configured, nothing is sent and the page behaves exactly as before: the link
+// is shown to copy and send by hand. A mail failure is never surfaced as an
+// error, because the invite itself was created and its link is on screen.
 
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -18,6 +21,7 @@ import {
   getPracticeMembersFn,
   removePracticeMemberFn,
 } from "~/server/practice-members";
+import { sendPracticeInviteEmailFn } from "~/server/mail";
 import { clientLimitLabel, planLimits } from "~/lib/plans";
 
 export const Route = createFileRoute("/practice/members")({
@@ -142,6 +146,20 @@ function PracticeMembersPage() {
     [data?.practice.plan],
   );
 
+  /**
+   * Email the invite link. Silent by design: no mail settings or a refused
+   * send both leave the copyable link on screen and the user with nothing to
+   * fix, so this reports only whether the email went out.
+   */
+  async function emailInvite(token: string): Promise<boolean> {
+    try {
+      const sent = await sendPracticeInviteEmailFn({ data: { token } });
+      return sent.sent;
+    } catch {
+      return false;
+    }
+  }
+
   async function handleInvite(e: React.FormEvent) {
     e.preventDefault();
     if (!data) return;
@@ -161,11 +179,15 @@ function PracticeMembersPage() {
           url: inviteUrl(result.invite.token),
         });
         setInviteEmail("");
+        const emailed = await emailInvite(result.invite.token);
+        const replaced = result.replacedPending
+          ? " This replaced the previous pending invite for that address."
+          : "";
         setNotice({
           kind: "ok",
-          text: result.replacedPending
-            ? "Invite link created — this replaced the previous pending invite for that address."
-            : "Invite link created.",
+          text: emailed
+            ? `Invite emailed to ${result.invite.email}.${replaced}`
+            : `Invite link created — send it to ${result.invite.email}.${replaced}`,
         });
         await load();
       }
@@ -336,8 +358,9 @@ function PracticeMembersPage() {
             Invite a practitioner
           </h2>
           <p className="mt-1 text-sm text-gray-500">
-            Creates a link you copy and send yourself — this app does not send
-            email. The link works for {14} days and can only be used once.
+            Creates a link and emails it to that address when mail is set up. The
+            link is also shown so you can copy and send it yourself. It works
+            for {14} days and can only be used once.
           </p>
 
           <form onSubmit={handleInvite} className="mt-4 flex flex-col gap-3 sm:flex-row">
