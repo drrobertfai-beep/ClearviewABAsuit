@@ -370,11 +370,17 @@ function VBMAPPFormPage() {
       )}
 
       <div className="rounded-lg bg-white p-4 shadow ring-1 ring-black/5 sm:p-6">
-        <VBMAPPForm scores={scores} onChange={setScores} readOnly={readOnly} />
+        <VBMAPPForm
+          scores={scores}
+          onChange={setScores}
+          readOnly={readOnly}
+          onSubmit={handleSubmit}
+          submitting={saving}
+        />
       </div>
 
       {!readOnly && (
-        <div className="mt-6 flex items-center justify-between">
+        <div className="sticky bottom-0 z-10 -mx-4 mt-6 flex items-center justify-between gap-3 border-t border-gray-200 bg-white/95 px-4 py-3 backdrop-blur sm:mx-0 sm:rounded-md sm:border sm:shadow-sm">
           <Link
             to="/assessments"
             className="rounded-md bg-white px-4 py-2 text-sm font-semibold text-gray-700 shadow-sm ring-1 ring-inset ring-gray-300 hover:bg-gray-50 transition-colors"

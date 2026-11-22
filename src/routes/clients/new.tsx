@@ -20,6 +20,9 @@ function NewClientPage() {
     Partial<Record<keyof ClientFormData | "form", string>>
   >({});
   const [saving, setSaving] = useState(false);
+  // Bumped on every failed submit so the form can jump to the first invalid
+  // field and scroll its error message into view.
+  const [submitAttempt, setSubmitAttempt] = useState(0);
 
   const validate = (): boolean => {
     const e: typeof errors = {};
@@ -31,7 +34,10 @@ function NewClientPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!validate()) return;
+    if (!validate()) {
+      setSubmitAttempt((n) => n + 1);
+      return;
+    }
 
     setSaving(true);
     setErrors({});
@@ -109,10 +115,16 @@ function NewClientPage() {
             onChange={setData}
             errors={errors}
             saving={saving}
+            submitAttempt={submitAttempt}
           />
 
           {/* Actions */}
           <div className="mt-8 flex items-center justify-end gap-3 border-t border-gray-100 pt-6">
+            {Object.keys(errors).some((key) => key !== "form") && (
+              <p className="mr-auto text-sm text-red-700" role="alert">
+                Not saved — a required field is missing.
+              </p>
+            )}
             <button
               type="button"
               onClick={() => navigate({ to: "/clients" })}

@@ -1,6 +1,6 @@
 // New treatment plan flow — /treatment-plans/new
 // Step 1: Select client → Step 2: Optionally link assessment → Create draft
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { listClientsFn } from "~/server/clients";
 import { createTreatmentPlanFn } from "~/server/treatment-plans";
@@ -29,6 +29,7 @@ function NewTreatmentPlanPage() {
   const [clientSearch, setClientSearch] = useState("");
   const [selectedClientId, setSelectedClientId] = useState<string>("");
   const [assessments, setAssessments] = useState<Assessment[]>([]);
+  const [unsubmitted, setUnsubmitted] = useState<Assessment[]>([]);
   const [selectedAssessmentId, setSelectedAssessmentId] = useState<string>("");
   const [assessmentSearch, setAssessmentSearch] = useState("");
   const [creating, setCreating] = useState(false);
@@ -63,16 +64,18 @@ function NewTreatmentPlanPage() {
   const goToAssessmentStep = async () => {
     if (!selectedClientId) return;
     try {
-      const all = await listAssessmentsFn({
-        data: {
-          clientId: selectedClientId,
-          status: "completed",
-        },
-      });
-      setAssessments(all);
+      // Fetch every assessment for the client, not just the submitted ones, so
+      // we can tell the user which assessments are still waiting to be
+      // submitted instead of showing an empty list.
+      const all = (await listAssessmentsFn({
+        data: { clientId: selectedClientId },
+      })) as Assessment[];
+      setAssessments(all.filter((a) => a.status === "completed"));
+      setUnsubmitted(all.filter((a) => a.status !== "completed"));
       setStep("assessment");
     } catch {
       setAssessments([]);
+      setUnsubmitted([]);
       setStep("assessment");
     }
   };
@@ -460,8 +463,40 @@ function NewTreatmentPlanPage() {
 
           {assessments.length === 0 && (
             <div className="rounded-md bg-gray-50 p-4 text-sm text-gray-500 text-center">
-              No completed assessments for this client. You can still create the
-              plan without linking one.
+              No submitted assessments for this client yet. You can still create
+              the plan without linking one.
+            </div>
+          )}
+
+          {/* Only submitted assessments can be linked — say so, and say how */}
+          {unsubmitted.length > 0 && (
+            <div className="mt-4 rounded-md border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+              <p className="font-medium">
+                {unsubmitted.length === 1
+                  ? `1 assessment for this client hasn't been submitted yet.`
+                  : `${unsubmitted.length} assessments for this client haven't been submitted yet.`}{" "}
+                Only a submitted assessment can be linked to a plan.
+              </p>
+              <p className="mt-1">
+                Open it, finish scoring, then press{" "}
+                <span className="font-semibold">Submit Assessment</span> at the
+                end of its Summary tab — then come back here.
+              </p>
+              <ul className="mt-2 space-y-1">
+                {unsubmitted.map((a) => (
+                  <li key={a.id}>
+                    <Link
+                      to="/assessments/$id/vb-mapp"
+                      params={{ id: a.id }}
+                      className="font-semibold text-amber-900 underline hover:text-amber-700"
+                    >
+                      Open {a.tool_name}
+                      {a.tool_version ? ` v${a.tool_version}` : ""} to finish and
+                      submit
+                    </Link>
+                  </li>
+                ))}
+              </ul>
             </div>
           )}
 
