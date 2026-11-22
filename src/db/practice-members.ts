@@ -667,3 +667,41 @@ export async function isActiveMember(
 export function practicePlanLabel(plan: string): string {
   return getPlan(plan)?.name ?? planLabel(plan);
 }
+
+/**
+ * The pending invite a token belongs to, scoped to one practice.
+ *
+ * Used by the invite email: the recipient address, role and expiry come from
+ * the row, never from the caller, so a manager can only mail the address this
+ * practice actually invited.
+ */
+export interface PendingInviteForEmail {
+  email: string;
+  role: PracticeRole;
+  expiresAt: string | null;
+  practiceName: string;
+}
+
+export async function getPendingInviteForPractice(
+  practiceId: string,
+  token: string,
+): Promise<PendingInviteForEmail | null> {
+  const rows = await sql()`
+    SELECT pi.email, pi.role, pi.expires_at, p.name AS practice_name
+    FROM practice_invites pi
+    JOIN practices p ON p.id = pi.practice_id
+    WHERE pi.practice_id = ${practiceId}
+      AND pi.token = ${token}
+      AND pi.accepted_at IS NULL
+      AND (pi.expires_at IS NULL OR pi.expires_at > now())
+    LIMIT 1
+  `;
+  const row = rows[0];
+  if (!row) return null;
+  return {
+    email: String(row.email),
+    role: row.role as PracticeRole,
+    expiresAt: toIsoOrNull(row.expires_at),
+    practiceName: String(row.practice_name ?? "a ClearView practice"),
+  };
+}
