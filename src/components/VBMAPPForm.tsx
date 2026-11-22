@@ -50,6 +50,9 @@ interface VBMAPPFormProps {
   scores: VBMAPPScores;
   onChange: (scores: VBMAPPScores) => void;
   readOnly?: boolean;
+  /** Submit handler — when given, the Summary tab offers "Submit Assessment". */
+  onSubmit?: () => void;
+  submitting?: boolean;
 }
 
 // ---- Helper: sum an array ----
@@ -584,7 +587,15 @@ function TaskAnalysisTab({ scores, onChange, readOnly }: VBMAPPFormProps) {
 
 // ---- Summary Tab ----
 
-function SummaryTab({ scores }: { scores: VBMAPPScores }) {
+function SummaryTab({
+  scores,
+  onSubmit,
+  submitting,
+}: {
+  scores: VBMAPPScores;
+  onSubmit?: () => void;
+  submitting?: boolean;
+}) {
   // Milestones summary
   const msTotals = useMemo(() => {
     const result: Record<string, { domainTotals: Record<string, number>; levelTotal: number }> = {};
@@ -749,13 +760,40 @@ function SummaryTab({ scores }: { scores: VBMAPPScores }) {
           </div>
         </div>
       </div>
+
+      {/* Submit — scoring ends here, so submitting has to be reachable here */}
+      {onSubmit && (
+        <div className="rounded-lg border border-indigo-200 bg-indigo-50 p-4">
+          <h3 className="text-sm font-semibold text-gray-900">
+            Finished scoring?
+          </h3>
+          <p className="mt-1 text-sm text-gray-600">
+            Submitting locks the scores and makes this assessment available to
+            link to a treatment plan.
+          </p>
+          <button
+            type="button"
+            onClick={onSubmit}
+            disabled={submitting}
+            className="mt-3 inline-flex items-center gap-2 rounded-md bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 disabled:opacity-60 transition-colors"
+          >
+            {submitting ? "Submitting…" : "Submit Assessment"}
+          </button>
+        </div>
+      )}
     </div>
   );
 }
 
 // ---- Main Form Component ----
 
-export function VBMAPPForm({ scores, onChange, readOnly }: VBMAPPFormProps) {
+export function VBMAPPForm({
+  scores,
+  onChange,
+  readOnly,
+  onSubmit,
+  submitting,
+}: VBMAPPFormProps) {
   const [activeTab, setActiveTab] = useState<TabId>("milestones");
 
   // Compute tab completion status
@@ -854,7 +892,13 @@ export function VBMAPPForm({ scores, onChange, readOnly }: VBMAPPFormProps) {
         {activeTab === "transition" && <TransitionTab scores={scores} onChange={onChange} readOnly={readOnly} />}
         {activeTab === "eesa" && <EESATab scores={scores} onChange={onChange} readOnly={readOnly} />}
         {activeTab === "task_analysis" && <TaskAnalysisTab scores={scores} onChange={onChange} readOnly={readOnly} />}
-        {activeTab === "summary" && <SummaryTab scores={scores} />}
+        {activeTab === "summary" && (
+          <SummaryTab
+            scores={scores}
+            onSubmit={readOnly ? undefined : onSubmit}
+            submitting={submitting}
+          />
+        )}
       </div>
     </div>
   );

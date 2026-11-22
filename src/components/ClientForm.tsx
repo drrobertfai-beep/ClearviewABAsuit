@@ -2,7 +2,7 @@
 // Used by both create (new) and edit pages.
 // Organised into tabs: Basic Info, Contact, Clinical, Insurance & Consent.
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 // ---- Local form data type (mirrors Client fields with string-friendly values) ----
 
@@ -96,6 +96,28 @@ const TABS: { id: TabId; label: string }[] = [
   { id: "insurance", label: "Insurance & Consent" },
 ];
 
+// Which tab each field lives on, in the order a validation error should be shown.
+// Used to jump the form to the first invalid field after a failed submit, so the
+// error is never left on a tab (or scrolled out of view) the user cannot see.
+const FIELD_TAB: Partial<Record<keyof ClientFormData, TabId>> = {
+  name: "basic",
+  date_of_birth: "basic",
+  gender: "basic",
+  status: "basic",
+  contact_email: "contact",
+  contact_phone: "contact",
+  address: "contact",
+  referral_source: "contact",
+  setting: "contact",
+  privacy_notes: "contact",
+  diagnoses: "clinical",
+  insurance_provider: "insurance",
+  insurance_policy_number: "insurance",
+  insurance_group_number: "insurance",
+};
+
+const FIELD_ORDER = Object.keys(FIELD_TAB) as (keyof ClientFormData)[];
+
 // ---- Props ----
 
 interface ClientFormProps {
@@ -103,12 +125,44 @@ interface ClientFormProps {
   onChange: (data: ClientFormData) => void;
   errors: Partial<Record<keyof ClientFormData | "form", string>>;
   saving: boolean;
+  /** Incremented by the page on every failed submit; makes the form jump to
+   *  the first invalid field and scroll it into view. */
+  submitAttempt?: number;
 }
 
 // ---- Component ----
 
-export function ClientForm({ data, onChange, errors, saving }: ClientFormProps) {
+export function ClientForm({
+  data,
+  onChange,
+  errors,
+  saving,
+  submitAttempt = 0,
+}: ClientFormProps) {
   const [activeTab, setActiveTab] = useState<TabId>("basic");
+  const [pendingFocus, setPendingFocus] = useState<keyof ClientFormData | null>(
+    null,
+  );
+
+  // After a failed submit: switch to the tab holding the first invalid field.
+  useEffect(() => {
+    if (!submitAttempt) return;
+    const first = FIELD_ORDER.find((key) => errors[key]);
+    if (!first) return;
+    setActiveTab(FIELD_TAB[first] as TabId);
+    setPendingFocus(first);
+  }, [submitAttempt, errors]);
+
+  // Once that tab is rendered, scroll the field into view and focus it so the
+  // error message next to it is actually on screen.
+  useEffect(() => {
+    if (!pendingFocus) return;
+    const el = document.getElementById(fieldId(pendingFocus));
+    if (!el) return;
+    el.scrollIntoView({ behavior: "smooth", block: "center" });
+    (el as HTMLInputElement).focus({ preventScroll: true });
+    setPendingFocus(null);
+  }, [pendingFocus, activeTab]);
 
   const update = (patch: Partial<ClientFormData>) => {
     onChange({ ...data, ...patch });
@@ -123,6 +177,24 @@ export function ClientForm({ data, onChange, errors, saving }: ClientFormProps) 
 
   return (
     <div className="space-y-6">
+      {/* Required-field legend — visible before anything is submitted */}
+      <p className="text-xs text-gray-500">
+        <span className="text-red-500" aria-hidden="true">
+          *
+        </span>{" "}
+        Required field
+      </p>
+
+      {/* Summary shown the moment a submit fails, next to the field errors */}
+      {Object.keys(errors).some((key) => key !== "form") && (
+        <div
+          className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700"
+          role="alert"
+        >
+          Please complete the highlighted fields. The first one is shown below.
+        </div>
+      )}
+
       {/* Tab bar */}
       <div className="border-b border-gray-200">
         <nav className="-mb-px flex space-x-4 overflow-x-auto" aria-label="Form sections">
@@ -138,6 +210,17 @@ export function ClientForm({ data, onChange, errors, saving }: ClientFormProps) 
               }`}
             >
               {tab.label}
+              {FIELD_ORDER.some(
+                (key) => errors[key] && FIELD_TAB[key] === tab.id,
+              ) && (
+                <span
+                  className="ml-1 text-red-500"
+                  aria-label="has an error"
+                  title="This section has a field that needs attention"
+                >
+                  •
+                </span>
+              )}
             </button>
           ))}
         </nav>
@@ -146,25 +229,44 @@ export function ClientForm({ data, onChange, errors, saving }: ClientFormProps) 
       {/* Tab panels */}
       {activeTab === "basic" && (
         <div className="space-y-4">
-          <Field label="Full Name" required error={errors.name}>
+          <Field label="Full Name" required name="name" error={errors.name}>
             <input
+              id={fieldId("name")}
               type="text"
               value={data.name}
               onChange={(e) => update({ name: e.target.value })}
               className="input"
               placeholder="First and last name"
+              required
               aria-required="true"
+              aria-invalid={errors.name ? true : undefined}
+              aria-describedby={
+                errors.name ? `${fieldId("name")}-error` : undefined
+              }
             />
           </Field>
 
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <Field label="Date of Birth" required error={errors.date_of_birth}>
+            <Field
+              label="Date of Birth"
+              required
+              name="date_of_birth"
+              error={errors.date_of_birth}
+            >
               <input
+                id={fieldId("date_of_birth")}
                 type="date"
                 value={data.date_of_birth}
                 onChange={(e) => update({ date_of_birth: e.target.value })}
                 className="input"
+                required
                 aria-required="true"
+                aria-invalid={errors.date_of_birth ? true : undefined}
+                aria-describedby={
+                  errors.date_of_birth
+                    ? `${fieldId("date_of_birth")}-error`
+                    : undefined
+                }
               />
             </Field>
 
@@ -432,26 +534,43 @@ export function ClientForm({ data, onChange, errors, saving }: ClientFormProps) 
 
 // ---- Small helper for labelled form fields ----
 
+const fieldId = (key: keyof ClientFormData) => `client-${key}`;
+
 function Field({
   label,
   required,
   error,
+  name,
   children,
 }: {
   label: string;
   required?: boolean;
   error?: string;
+  /** Field key — links the label and the error message to the input. */
+  name?: keyof ClientFormData;
   children: React.ReactNode;
 }) {
   return (
     <div>
-      <label className="block text-sm font-medium text-gray-700 mb-1">
+      <label
+        className="block text-sm font-medium text-gray-700 mb-1"
+        htmlFor={name ? fieldId(name) : undefined}
+      >
         {label}
-        {required && <span className="text-red-500 ml-0.5">*</span>}
+        {required && (
+          <span className="text-red-500 ml-0.5" aria-hidden="true">
+            *
+          </span>
+        )}
+        {required && <span className="sr-only"> (required)</span>}
       </label>
       {children}
       {error && (
-        <p className="mt-1 text-xs text-red-600" role="alert">
+        <p
+          className="mt-1 text-xs text-red-600"
+          role="alert"
+          id={name ? `${fieldId(name)}-error` : undefined}
+        >
           {error}
         </p>
       )}
